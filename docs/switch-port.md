@@ -1,7 +1,8 @@
 # sm64coopdx — Nintendo Switch port (deko3d)
 
-Status: **Phase 1 done (headless boot).** The NRO and NSP build and boot in yuzu. The game loads the ROM, built-in
-mods and DynOS packs, then runs its loop with no renderer. Phase 2 (deko3d bring-up) is next.
+Status: **Phase 2 done in yuzu (deko3d bring-up).** The game runs on the Switch window manager and the deko3d
+renderer: device, swapchain, per-frame memory and a test triangle presenting at 60 fps. Fast3D drawing is Phase 3.
+Phase 1 (headless boot) is also verified on real hardware.
 
 ## Building
 
@@ -10,6 +11,7 @@ builds also need `hacbrewpack` on `PATH`.
 
 ```sh
 make TARGET_SWITCH=1 -j$(nproc)                            # build/us_nx/sm64coopdx.nro
+make TARGET_SWITCH=1 DEKO3D_DEBUG=1 -j$(nproc)             # same, with deko3d's validating debug library
 make TARGET_SWITCH=1 nsp KEYS=/path/to/your/prod.keys      # build/us_nx/sm64coopdx.nsp
 make TARGET_SWITCH=1 run-yuzu [YUZU=/path/to/yuzu]         # launch the NRO in yuzu
 tools/switch/build_lua.sh                                  # rebuild lib/lua/switch/liblua53.a
@@ -71,6 +73,45 @@ until a renderer exists; gate or remove it later.
 - **Binary size:** the static SDL2 links Mesa's EGL/nouveau even with SDL video unused, because `SDL_Init`
   references the video subsystem. Revisit in Phase 7 if size matters.
 
+## Phase 2 results
+
+| Check | Result |
+|---|---|
+| deko3d device, queue, 3-image swapchain + Z24S8 depth, 1920×1080 framebuffers | ✅ |
+| Separate memblocks: images, shader code (4 MiB bump), commands (1 MiB/frame), vertices (8 MiB/frame ring) | ✅ |
+| 2 frames in flight, one fence each, no mid-frame GPU stall | ✅ |
+| Test triangle through the real vertex path (ring buffer → `dkCmdBufBindVtxBuffer`), shaders precompiled with uam | ✅ |
+| Steady **60.0 fps** presented in yuzu (game logic 30 ticks/s underneath) | ✅ |
+| No errors from the validating `libdeko3dd` | ✅ |
+| Docked 1920×1080 in yuzu | ✅ |
+| Handheld 1280×720 (swapchain crop) and live dock/undock switching | needs hardware |
+| HOME button / exit via `appletMainLoop()` | needs hardware |
+
+### Design
+
+- **`src/pc/switch/gfx_switch_wm.c`** (libnx only): native window, applet messages (HOME suspend, exit request →
+  `game_exit()`), focus, timing, and the docked/handheld output size (polled each frame from
+  `appletGetOperationMode()`). Calls `controller_bind_init()` like the SDL window manager. Text input and clipboard
+  are stubs until Phase 4.
+- **`src/pc/switch/gfx_deko3d.c`** (deko3d + game headers, no libnx): the `GfxRenderingAPI`. Fast3D entry points are
+  stubs until Phase 3. `gfx_switch.h` is the stdint-only glue between the two files.
+- **Resolution:** framebuffers are always 1920×1080. Handheld renders into the top-left 1280×720 and presents only
+  that region with `dkSwapchainSetCrop`, so docking needs no swapchain rebuild.
+- **Coordinates:** `OriginUpperLeft` + `DepthMinusOneToOne`. Depth matches OpenGL, so `z_is_from_0_to_1` is
+  `false`, as in the GL backend. Phase 3 must flip viewport/scissor y (`outputHeight - y - height`).
+  `OriginLowerLeft` looked like a shortcut but renders **upside down**: like OpenGL textures, row 0 becomes the
+  bottom, while the display scans row 0 at the top. Caught by the capture tool below.
+- **Unpaired frames:** `rendering_init()` runs a display list (`start_frame`) that is never ended or presented.
+  Harmless in GL, but in deko3d each `start_frame` acquires a swapchain image, which ran the swapchain dry right
+  after loading. The renderer now reuses the acquired image if a frame is already open.
+
+### Debug tools
+
+- `log.txt` gets a line every 10 s: game ticks, frames presented, fps, malloc heap.
+- **Framebuffer capture:** create an empty file named `capture` in `sdmc:/switch/sm64coopdx/`. Within 10 s the game
+  deletes it and writes the next frame to `capture_<frame>.ppm` (the whole 1920×1080 framebuffer; handheld output
+  is its top-left 1280×720). It works over MTP on hardware, and it's how Phase 3 will compare against PC screenshots.
+
 Base: upstream coopdx at `8cd6e5977` ("Update updater libs"), network version `v42.1`
 (`src/pc/network/version.h`). The Switch build must keep this version so it can play with PC clients.
 
@@ -120,7 +161,7 @@ per-draw uniform API.
 
 | Function | GL implementation | deko3d plan |
 |---|---|---|
-| `z_is_from_0_to_1` | returns `false` | Return `true` and use `DkDepthMode_ZeroOne`. Check `gfx_pc.c:1211` for the z remap first. Otherwise keep `false` and use `DkDepthMode_MinusOneOne` |
+| `z_is_from_0_to_1` | returns `false` | returns `false`; device created with `DkDeviceFlags_DepthMinusOneToOne` (done in Phase 2) |
 | `unload_shader` / `load_shader` | `glUseProgram`, attrib enable | bind DKSH pair + vertex attrib/buffer state; mark uniforms dirty |
 | `create_and_load_new_shader(cc)` | builds GLSL 1.20 from `ColorCombiner` | same generator emitting GLSL 4.60 → uam at runtime → DKSH cache |
 | `lookup_shader(cc)` | linear search, key `cc->hash` (u64) | same; disk cache key = `cc->hash` + backend version |
@@ -296,8 +337,9 @@ These are guesses until measured on hardware.
 | CoopNet | no aarch64-switch build yet (Phase 5); `COOPNET=1` errors out | `switch.mk` |
 | Mumble positional audio | needs POSIX shared memory | `mumble.c` |
 | `open_url` / `open_folder` | no process spawning (may use the `webWifi` applet later) | compile to no-ops |
-| Rendering, window, keyboard/text input | SDL/GL backend excluded; deko3d in Phases 2–3 | `switch.mk`, `pc_main.c` |
-| HOME button / applet messages | nothing calls `appletMainLoop()` yet; the Switch window manager (Phase 2) will | — |
+| Fast3D drawing (the game itself is invisible) | Phase 3 | `gfx_deko3d.c` stubs |
+| Keyboard/text input, clipboard | software keyboard in Phase 4 | `gfx_switch_wm.c` stubs |
+| MSAA | not implemented (`get_max_msaa` returns 0) | `gfx_switch_wm.c` |
 
 The **update checker stays on**: it only shows an "update available" popup and fails quietly when offline.
 
