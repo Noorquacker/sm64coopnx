@@ -451,7 +451,7 @@ These are guesses until measured on hardware.
 |---|---|---|
 | Discord SDK / rich presence | closed-source, no Switch binary | `switch.mk` (`DISCORD_SDK=0`) |
 | Auto-updater | can't replace a running `.nro`; no updater binary | `switch.mk` (`UPDATER=0`), `misc.c` `update_game` |
-| CoopNet | no aarch64-switch build yet (Phase 5); `COOPNET=1` errors out | `switch.mk` |
+| Touch screen menu selection | not done yet (later): DJUI menus need a controller; tapping menu items would need touch → mouse events in the window manager | `gfx_switch_wm.c` |
 | Mumble positional audio | needs POSIX shared memory | `mumble.c` |
 | `open_url` / `open_folder` | no process spawning (may use the `webWifi` applet later) | compile to no-ops |
 | Clipboard | in-game only (Ctrl+C/Ctrl+V between DJUI fields), no system clipboard on Switch | `gfx_switch_wm.c` |
