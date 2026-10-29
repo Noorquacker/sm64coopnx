@@ -109,8 +109,10 @@ until a renderer exists; gate or remove it later.
 
 - `log.txt` gets a line every 10 s: game ticks, frames presented, fps, malloc heap.
 - **Framebuffer capture:** create an empty file named `capture` in `sdmc:/switch/sm64coopdx/`. Within 10 s the game
-  deletes it and writes the next frame to `capture_<frame>.ppm` (the whole 1920×1080 framebuffer; handheld output
-  is its top-left 1280×720). It works over MTP on hardware, and it's how Phase 3 will compare against PC screenshots.
+  deletes it and writes the next frame's visible region (1920×1080 docked, 1280×720 handheld) to
+  `capture_<frame>.ppm`. Readback uses CPU-cached memory and the file is written on a background thread. The first
+  version used uncached memory and froze the game for ~3 s on hardware. It works over MTP on hardware (but MTP is
+  unavailable while the game runs), and it's how Phase 3 will compare against PC screenshots.
 
 Base: upstream coopdx at `8cd6e5977` ("Update updater libs"), network version `v42.1`
 (`src/pc/network/version.h`). The Switch build must keep this version so it can play with PC clients.

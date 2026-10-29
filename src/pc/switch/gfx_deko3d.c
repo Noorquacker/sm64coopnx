@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #include <deko3d.h>
 
@@ -226,41 +227,75 @@ static void gfx_deko3d_draw_test_triangle(void) {
  // framebuffer capture //
 ////////////////////////////
 
-// records a copy of the whole framebuffer; call before the frame's fence is signaled
+struct CaptureJob {
+    char path[256];
+    uint32_t width;
+    uint32_t height;
+    uint8_t *rgb;
+};
+
+// records a copy of the visible region; call before the frame's fence is signaled
 static void gfx_deko3d_record_capture(void) {
     if (!sCaptureMem) {
-        sCaptureMem = gfx_deko3d_memblock_create(FB_WIDTH * FB_HEIGHT * 4, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached);
+        // CPU cached: reading back from uncached memory stalled the frame for seconds on hardware
+        sCaptureMem = gfx_deko3d_memblock_create(FB_WIDTH * FB_HEIGHT * 4, DkMemBlockFlags_CpuCached | DkMemBlockFlags_GpuCached);
     }
 
     DkImageView view;
     dkImageViewDefaults(&view, &sFramebuffers[sImageSlot]);
-    DkImageRect rect = { .x = 0, .y = 0, .z = 0, .width = FB_WIDTH, .height = FB_HEIGHT, .depth = 1 };
+    DkImageRect rect = { .x = 0, .y = 0, .z = 0, .width = sOutputWidth, .height = sOutputHeight, .depth = 1 };
     DkCopyBuf dst = { .addr = dkMemBlockGetGpuAddr(sCaptureMem), .rowLength = 0, .imageHeight = 0 };
 
     dkCmdBufBarrier(sCmdBuf, DkBarrier_Fragments, 0);
     dkCmdBufCopyImageToBuffer(sCmdBuf, &view, &rect, &dst, 0);
 }
 
-// writes the captured framebuffer as a binary PPM; call after the frame's fence completed
+static void *gfx_deko3d_capture_writer(void *arg) {
+    struct CaptureJob *job = arg;
+    FILE *f = fopen(job->path, "wb");
+    if (f) {
+        fprintf(f, "P6\n%u %u\n255\n", job->width, job->height);
+        fwrite(job->rgb, 3, job->width * job->height, f);
+        fclose(f);
+        printf("[deko3d] captured %ux%u frame to %s\n", job->width, job->height, job->path);
+    } else {
+        fprintf(stderr, "[deko3d] could not write capture %s\n", job->path);
+    }
+    free(job->rgb);
+    free(job);
+    return NULL;
+}
+
+// converts the captured pixels to RGB and writes them on a background thread;
+// call after the frame's fence completed
 static void gfx_deko3d_write_capture(void) {
-    FILE *f = fopen(sCapturePath, "wb");
-    if (!f) {
-        fprintf(stderr, "[deko3d] could not write capture %s\n", sCapturePath);
+    uint32_t width = sOutputWidth;
+    uint32_t height = sOutputHeight;
+    struct CaptureJob *job = malloc(sizeof(struct CaptureJob));
+    uint8_t *rgb = malloc(width * height * 3);
+    if (!job || !rgb) {
+        free(job);
+        free(rgb);
         return;
     }
 
+    dkMemBlockFlushCpuCache(sCaptureMem, 0, width * height * 4);
     const uint8_t *pixels = dkMemBlockGetCpuAddr(sCaptureMem);
-    static uint8_t row[FB_WIDTH * 3];
-    fprintf(f, "P6\n%d %d\n255\n", FB_WIDTH, FB_HEIGHT);
-    for (int y = 0; y < FB_HEIGHT; y++) {
-        for (int x = 0; x < FB_WIDTH; x++) {
-            memcpy(&row[x * 3], &pixels[(y * FB_WIDTH + x) * 4], 3);
-        }
-        fwrite(row, 1, sizeof(row), f);
+    for (uint32_t i = 0; i < width * height; i++) {
+        memcpy(&rgb[i * 3], &pixels[i * 4], 3);
     }
-    fclose(f);
-    printf("[deko3d] captured framebuffer to %s (output is the %ux%u region at the top left)\n",
-           sCapturePath, sOutputWidth, sOutputHeight);
+
+    snprintf(job->path, sizeof(job->path), "%s", sCapturePath);
+    job->width = width;
+    job->height = height;
+    job->rgb = rgb;
+
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, gfx_deko3d_capture_writer, job) == 0) {
+        pthread_detach(thread);
+    } else {
+        gfx_deko3d_capture_writer(job);
+    }
 }
 
 void gfx_deko3d_request_capture(const char *path) {
