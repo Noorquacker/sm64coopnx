@@ -1,8 +1,8 @@
 # sm64coopnx — sm64coopdx for Nintendo Switch (deko3d)
 
-Status: **Phase 2 done in yuzu (deko3d bring-up).** The game runs on the Switch window manager and the deko3d
-renderer: device, swapchain, per-frame memory and a test triangle presenting at 60 fps. Fast3D drawing is Phase 3.
-Phase 1 (headless boot) is also verified on real hardware.
+Status: **Phase 3 rendering done in yuzu.** The game renders through deko3d and matches the PC OpenGL build in
+the four reference scenes (see "Phase 3 results"). Hosting works over IPv4. Still to confirm on hardware:
+gameplay, shader compile times, and the validating deko3d build there.
 
 ## Building
 
@@ -108,11 +108,93 @@ until a renderer exists; gate or remove it later.
 ### Debug tools
 
 - `log.txt` gets a line every 10 s: game ticks, frames presented, fps, malloc heap.
-- **Framebuffer capture:** create an empty file named `capture` in `sdmc:/switch/sm64coopnx/`. Within 10 s the game
+- **Framebuffer capture:** create an empty file named `capture` in `sdmc:/switch/sm64coopnx/`. Within a second the game
   deletes it and writes the next frame's visible region (1920×1080 docked, 1280×720 handheld) to
   `capture_<frame>.ppm`. Readback uses CPU-cached memory and the file is written on a background thread. The first
   version used uncached memory and froze the game for ~3 s on hardware. It works over MTP on hardware (but MTP is
   unavailable while the game runs), and it's how Phase 3 will compare against PC screenshots.
+
+## Phase 3 (Fast3D on deko3d)
+
+### Results
+
+| Check | Result |
+|---|---|
+| Castle Grounds, Bob-omb Battlefield, CCM slide, Bowser in the Dark World match PC GL | ✅ in yuzu: Castle Grounds differs in 0.1% of pixels (>3%), all from animation (Mario, waterfall) and HUD glyph edges |
+| Textures, alpha blending, translucent dialog boxes, text, fog/skybox, decals, HUD, DJUI menus | ✅ |
+| No errors from the validating `libdeko3dd` | ✅ |
+| 60 fps presented in yuzu | ✅ |
+| Host a game (single-player) on Switch | ✅ in yuzu (needed IPv4 sockets, below) |
+| Hardware: playable, shader compile times, validation | pending |
+
+### Shared GLSL generator (upstream candidate)
+
+The color combiner GLSL generator moved from `gfx_opengl.c` into `src/pc/gfx/gfx_glsl.c`, as decided before Phase 3 (shared file over a Switch-only copy). It takes
+a dialect: GLSL 1.20, ES 1.00, or 4.60 for deko3d. It also returns the vertex layout and which uniforms are used,
+so `gfx_opengl.c` keeps only the GL compile/link/lookup code.
+
+- **GL output is unchanged:** checked byte for byte against the previous generator over 50,000 random combiners
+  (built the way `gfx_generate_cc()` builds them), for both 1.20 and ES 1.00. A deliberately broken generator
+  fails the same check (12,501 mismatches), so the test has teeth.
+- **4.60 dialect:** explicit `location`s, `texture()`, an output variable, samplers at binding N, and all uniforms
+  in one fixed std140 block (`GFX_GLSL_460_UNIFORM_BLOCK`). `filter` is a reserved word in 4.60, so the parameter is
+  `filterMode` there. 300 random combiners were compiled with uam; every one that fails also fails as GLSL 1.20.
+  Those combiners use COMBINED in the first cycle, which the game doesn't produce.
+- **Upstream note:** the existing 1.20 shaders also use `filter` as a parameter name. Desktop drivers accept it,
+  strict compilers (glslang) don't. Trivial upstream fix.
+
+### Runtime shader compilation (uam)
+
+- `tools/switch/build_uam.sh` builds uam v1.1.0 (`5a5afc2`) for the Switch with uam's own meson build and a
+  devkitA64 cross file, and adds a C interface: `lib/uam/include/uam.h` → `uam_compile_dksh(stage, glsl, path)`.
+- **Symbol isolation:** uam contains its own copy of Mesa's GLSL compiler, and the static SDL2 pulls in a different
+  Mesa (libEGL.a) even though SDL video is never used. Hiding the symbols wasn't enough, because C++ vtables and
+  inline functions are COMDAT groups named after their symbol, and uam's groups replaced libEGL's. The script
+  prelinks uam into one object, renames every symbol it defines to `__uam_*` (which renames the groups), and
+  leaves only `uam_compile_dksh` global.
+- **Cache:** `<user dir>/shadercache/<key>_{vsh,fsh}.dksh`, where the key is a hash of the generated GLSL plus
+  the uam version. Generator or compiler changes invalidate entries automatically, with no manual version bumps.
+  Entries are checked for the DKSH magic and recompiled if damaged. This is per-file, not the single
+  `shadercache.bin` from the handoff: simpler, and a crash can only lose one entry.
+- **Cost in yuzu:** ~30–60 ms per combiner. The first compile of a session takes ~650 ms (GLSL frontend setup).
+  First boot compiles the ~43 combiners from `gfx_cc_precomp()`. Later boots load them from the cache. Hardware
+  times still to be measured (Phase 7); shipping a prebuilt cache in romfs is an option if needed.
+
+### Renderer (`src/pc/switch/gfx_deko3d.c`)
+
+- **Memory:** a small first-fit heap allocator serves texture images (growable 32 MiB blocks) and shader code
+  (4 MiB). Frees are deferred until the fence of the frame that was recording has passed, so a re-uploaded
+  texture or an evicted shader is never overwritten while a frame in flight uses it. Vertices and upload staging
+  come from a 16 MiB per-frame ring, with overflow blocks if a frame needs more. Command memory grows the same way.
+- **Textures:** RGBA8, uploaded with `dkCmdBufCopyBufferToImage`. Descriptors are updated with `dkCmdBufPushData`
+  (GPU timeline), with one barrier before the next draw. 18 prebuilt samplers ({nearest, linear} × {repeat,
+  mirror, clamp}²) belong to the texture, as in GL. Texture 0 is a 1×1 white fallback. Fast3D has no
+  delete-texture call: its cache re-uploads into existing ids, which the deferred frees handle.
+- **State:** GL semantics are kept: no depth writes while the depth test is off, `LEQUAL`, decal = depth bias
+  (GL `glPolygonOffset(-2,-2)`; constant ×2 for NVIDIA as in Mesa's nouveau), `SRC_ALPHA/ONE_MINUS_SRC_ALPHA`
+  for color and alpha. All state is shadowed and re-emitted lazily after each frame starts. Uniforms are pushed
+  only when they change.
+
+### Networking pulled forward from Phase 5: IPv4 sockets
+
+In coopdx even single-player starts by hosting a game, so this was needed to play at all.
+`src/pc/network/socket/socket.c` uses a dual-stack IPv6 socket (IPv4 peers as v4-mapped addresses), but the
+Switch's BSD sockets are IPv4 only, on hardware as well as in yuzu ("Address family not supported").
+`src/pc/switch/socket_switch.c` is an IPv4 port of `socket.c` + `socket_linux.c` (both excluded on Switch).
+Packets are identical, and a PC's dual-stack socket talks to IPv4 peers natively, so the protocol doesn't change.
+**Keep it in sync with `socket.c`.**
+
+### Testing tools
+
+- **`args.txt`:** hbmenu and yuzu can't pass command line options to an NRO (yuzu's `-p` doesn't reach it). If
+  `<user dir>/args.txt` exists, its contents replace the command line, e.g. `--server 7777 --skip-intro`. The log
+  shows when it's used. Delete it to go back to normal.
+- **`tools/switch/render_compare.sh ROM OUT_DIR`:** runs `tools/switch/render-test` (a Lua mod that hosts, warps
+  through Castle Grounds, Bob-omb Battlefield, the CCM slide and Bowser in the Dark World, and prints a marker in
+  each). It runs this on the PC GL build on a virtual X display (Xvfb, forced to X11, with a temporary
+  `--savepath`) and on the Switch build in yuzu (captures via the trigger file), then writes side-by-side PNGs.
+- `log.txt` is `fsync`ed once a second, so the last lines survive a crash. In yuzu, lines can still reach the host
+  file ~10 s late (yuzu's own buffering), so the render test holds each scene for 40 s.
 
 Base: upstream coopdx at `8cd6e5977` ("Update updater libs"), network version `v42.1`
 (`src/pc/network/version.h`). The Switch build must keep this version so it can play with PC clients.
@@ -339,7 +421,6 @@ These are guesses until measured on hardware.
 | CoopNet | no aarch64-switch build yet (Phase 5); `COOPNET=1` errors out | `switch.mk` |
 | Mumble positional audio | needs POSIX shared memory | `mumble.c` |
 | `open_url` / `open_folder` | no process spawning (may use the `webWifi` applet later) | compile to no-ops |
-| Fast3D drawing (the game itself is invisible) | Phase 3 | `gfx_deko3d.c` stubs |
 | Keyboard/text input, clipboard | software keyboard in Phase 4 | `gfx_switch_wm.c` stubs |
 | MSAA | not implemented (`get_max_msaa` returns 0) | `gfx_switch_wm.c` |
 
