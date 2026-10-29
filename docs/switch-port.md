@@ -1,8 +1,8 @@
 # sm64coopnx — sm64coopdx for Nintendo Switch (deko3d)
 
-Status: **Phase 3 rendering done in yuzu.** The game renders through deko3d and matches the PC OpenGL build in
-the four reference scenes (see "Phase 3 results"). Hosting works over IPv4. Still to confirm on hardware:
-gameplay, shader compile times, and the validating deko3d build there.
+Status: **Phase 3 done** (verified in yuzu and on hardware). The game renders through deko3d, matches the PC
+OpenGL build in the reference scenes, runs at 60 fps handheld, hosts over IPv4, and exits cleanly. Phase 4 (input,
+text entry, audio, display) is next. Docked play on hardware is still to be checked.
 
 ## Building
 
@@ -129,6 +129,7 @@ until a renderer exists; gate or remove it later.
 | Hardware: new combiners compile in **90–135 ms** each (~3× yuzu); several in a row cause a visible hitch | known, Phase 7 (prebuilt cache in romfs / compile ahead) |
 | Hardware: quitting from the menu crashed the console | fixed, two causes: the stats thread outlived the NRO when returning to hbmenu (found via the Atmosphère crash report), then `dkDeviceDestroy: unfreed memory blocks` because shutdown didn't free the texture/shader heaps (reproduced and verified in yuzu with the `quit` trigger) |
 | Hardware: A/B swapped (B jumped and confirmed) | fixed: devkitPro's SDL maps Switch buttons by position (Xbox layout); `gfx_switch_wm.c` registers a by-label mapping, so A jumps/confirms and B punches/goes back |
+| Hardware: quit from the menu, A/B by label | ✅ confirmed after the fixes below |
 | Hardware, docked | not yet tested |
 
 ### Shared GLSL generator (upstream candidate)
