@@ -6,6 +6,8 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#elif defined(TARGET_SWITCH)
+#include "switch/platform_switch.h"
 #endif
 
 extern "C" {
@@ -63,10 +65,14 @@ static bool is_rom_valid(const std::string romPath) {
 
             // Copy the rom to the user path
             if (romPath != destPath && !std::filesystem::exists(std::filesystem::path(destPath))) {
+#if defined(TARGET_SWITCH)
+                switch_copy_file(romPath.c_str(), destPath.c_str());
+#else
                 std::filesystem::copy_file(
                     std::filesystem::path(romPath),
                     std::filesystem::path(destPath)
                 );
+#endif
             }
 
             snprintf(gRomFilename, SYS_MAX_PATH, "%s", destPath.c_str()); // Load the copied rom

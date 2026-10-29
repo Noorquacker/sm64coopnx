@@ -86,6 +86,13 @@ WINDOWS_AUTO_BUILDER ?= 0
 # Setup extra cflags
 EXTRA_CFLAGS ?=
 EXTRA_CPP_FLAGS ?=
+
+# Build for Nintendo Switch (requires devkitPro, see docs/switch-port.md)
+TARGET_SWITCH ?= 0
+ifeq ($(TARGET_SWITCH),1)
+  include switch.mk
+endif
+
 EXTRA_CFLAGS += -Wno-format-security -Wno-trigraphs -Wno-missing-braces -Wno-missing-field-initializers
 
 dev:; @$(MAKE) DEVELOPMENT=1
@@ -519,6 +526,11 @@ ifeq ($(TARGET_N64),0)
 
 	C_FILES           := $(filter-out src/game/main.c,$(C_FILES))
 	ULTRA_C_FILES     := $(addprefix lib/src/,$(ULTRA_C_FILES))
+endif
+
+ifeq ($(TARGET_SWITCH),1)
+  SRC_DIRS += src/pc/switch
+  C_FILES  := $(filter-out $(SWITCH_EXCLUDED_C_FILES),$(C_FILES)) $(wildcard src/pc/switch/*.c)
 endif
 
 # Sound files

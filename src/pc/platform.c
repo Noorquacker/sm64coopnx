@@ -292,6 +292,15 @@ static void sys_fatal_impl(const char *msg) {
     exit(1);
 }
 
+#elif defined(TARGET_SWITCH)
+
+// path functions are implemented in switch/platform_switch.c
+#include "switch/platform_switch.h"
+
+static void sys_fatal_impl(const char *msg) {
+    switch_fatal(msg);
+}
+
 #else
 
 #include <SDL2/SDL.h>

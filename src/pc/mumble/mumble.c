@@ -15,6 +15,8 @@
 
 #ifdef _WIN32
 	#include <windows.h>
+#elif defined(TARGET_SWITCH)
+	// no shared memory on Switch, Mumble link is disabled
 #else
 	#include <sys/mman.h>
 	#include <fcntl.h> /* For O_* constants */
@@ -41,6 +43,8 @@ void mumble_init(void) {
 		hMapObject = NULL;
 		return;
 	}
+#elif defined(TARGET_SWITCH)
+	return;
 #else
 	char memname[256];
 	snprintf(memname, 256, "/MumbleLink.%d", getuid());

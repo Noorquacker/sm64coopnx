@@ -226,6 +226,10 @@ static void select_graphics_backend(void) {
         configGraphicsBackend = GAPI_D3D11;
     }
 #endif
+#if defined(TARGET_SWITCH)
+    // TODO: deko3d backend (docs/switch-port.md, Phases 2-3). Until then the game runs on the dummy window/renderer
+    gAudioApi = &audio_sdl;
+#else
     int backend = configGraphicsBackend;
 #if defined(_WIN32)
     if (gCLIOpts.backend != -1) { backend = gCLIOpts.backend; }
@@ -250,6 +254,7 @@ static void select_graphics_backend(void) {
             gAudioApi  = &audio_sdl;
             break;
     }
+#endif
 
     if (!gAudioApi->init()) {
         gAudioApi = &audio_null;
