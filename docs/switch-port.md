@@ -212,7 +212,8 @@ Packets are identical, and a PC's dual-stack socket talks to IPv4 peers natively
   are no shared DJUI changes, and nothing runs inside DJUI's own focus callback.
 - **Mod audio:** Lua mods play sounds through miniaudio, which has no playback device on Switch (only its null
   backend), so they were silent. On Switch the miniaudio engine runs without a device at the game's output format
-  (stereo 32 kHz), and `audio_switch` mixes it into the game's SDL audio. Verified in yuzu with a streamed song.
+  (stereo 32 kHz), and `audio_switch` mixes it into the game's SDL audio. Verified in yuzu, and on hardware with a
+  test mod playing a looping stream and a sample on every jump.
 - **Controllers (devkitPro SDL, from its source):** handheld, Joy-Con pair and Pro Controller have full analog
   input, and SDL shows the system controller setup applet by itself when controllers change. A **single Joy-Con
   held sideways only reports its stick as four digital directions**, which isn't enough to play. There's also no
