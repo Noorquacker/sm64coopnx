@@ -35,11 +35,10 @@ override OSX_BUILD     := 0
 override WINDOWS_BUILD := 0
 override TARGET_BITS   := 0
 
-# CoopNet has no aarch64-switch build yet (Phase 5)
-ifeq ($(origin COOPNET)$(COOPNET),command line1)
-  $(error COOPNET=1 is not supported on Switch yet)
+# CoopNet (public lobbies): lib/coopnet/switch, built by tools/switch/build_coopnet.sh
+ifeq ($(COOPNET),1)
+  SWITCH_COOPNET_LIBS := -Llib/coopnet/switch -l:libcoopnet.a -l:libjuice.a
 endif
-override COOPNET := 0
 
 # SDL window + OpenGL backend: replaced by the deko3d backend (src/pc/switch/gfx_*)
 SWITCH_EXCLUDED_C_FILES := src/pc/gfx/gfx_opengl.c src/pc/gfx/gfx_sdl.c
@@ -74,7 +73,7 @@ else
 endif
 
 override LDFLAGS := -specs=$(LIBNX)/switch.specs $(SWITCH_ARCH) -Wl,-Map,$(BUILD_DIR)/sm64coopnx.map \
-                    -Llib/lua/switch -l:liblua53.a -Llib/uam/switch -luam \
+                    -Llib/lua/switch -l:liblua53.a -Llib/uam/switch -luam $(SWITCH_COOPNET_LIBS) \
                     -L$(PORTLIBS)/lib -lcurl -lz $(shell $(SDLCONFIG) --static-libs) \
                     -L$(LIBNX)/lib $(DEKO3D_LIB) -lnx -lm
 

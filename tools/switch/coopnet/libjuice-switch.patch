@@ -1,0 +1,107 @@
+--- a/src/socket.h	2026-10-29 12:00:09.783868267 -0500
++++ b/src/socket.h	2026-10-29 12:00:09.814553186 -0500
+@@ -81,7 +81,7 @@
+ #define NO_PMTUDISC
+ #endif
+ 
+-#ifdef __ANDROID__
++#if defined(__ANDROID__) || defined(__SWITCH__) // Switch: no getifaddrs() in libnx
+ #define NO_IFADDRS
+ #else
+ #include <ifaddrs.h>
+--- a/src/random.c	2026-10-29 12:00:09.792144044 -0500
++++ b/src/random.c	2026-10-29 12:00:09.814753284 -0500
+@@ -33,6 +33,16 @@
+ 	return 0;
+ }
+ 
++#elif defined(__SWITCH__)
++
++#include <switch.h>
++
++// libnx's CSPRNG (otherwise this would fall back on a time-seeded random())
++static int random_bytes(void *buf, size_t size) {
++	randomGet(buf, size);
++	return 0;
++}
++
+ #elif defined(_WIN32)
+ 
+ #ifndef _WIN32_WINNT
+--- a/src/conn_poll.c	2026-10-29 12:05:30.832699507 -0500
++++ b/src/conn_poll.c	2026-10-29 12:05:30.846991347 -0500
+@@ -20,7 +20,12 @@
+ 
+ typedef struct registry_impl {
+ 	thread_t thread;
+-#ifdef _WIN32
++// No pipe() on Switch (libnx): interrupt poll() with a localhost UDP socket, like on Windows
++#if defined(_WIN32) || defined(__SWITCH__)
++#define INTERRUPT_SOCKET
++#endif
++
++#ifdef INTERRUPT_SOCKET
+ 	socket_t interrupt_sock;
+ #else
+ 	int interrupt_pipe_out;
+@@ -64,10 +69,14 @@
+ 		return -1;
+ 	}
+ 
+-#ifdef _WIN32
++#ifdef INTERRUPT_SOCKET
+ 	udp_socket_config_t interrupt_config;
+ 	memset(&interrupt_config, 0, sizeof(interrupt_config));
++#ifdef __SWITCH__
++	interrupt_config.bind_address = "127.0.0.1";
++#else
+ 	interrupt_config.bind_address = "localhost";
++#endif
+ 	registry_impl->interrupt_sock = udp_create_socket(&interrupt_config);
+ 	if (registry_impl->interrupt_sock == INVALID_SOCKET) {
+ 		JLOG_FATAL("Dummy socket creation failed");
+@@ -100,7 +109,7 @@
+ 	return 0;
+ 
+ error:
+-#ifndef _WIN32
++#ifndef INTERRUPT_SOCKET
+ 	close(registry_impl->interrupt_pipe_out);
+ 	close(registry_impl->interrupt_pipe_in);
+ #endif
+@@ -115,7 +124,7 @@
+ 	JLOG_VERBOSE("Waiting for connections thread");
+ 	thread_join(registry_impl->thread, NULL);
+ 
+-#ifdef _WIN32
++#ifdef INTERRUPT_SOCKET
+ 	closesocket(registry_impl->interrupt_sock);
+ #else
+ 	close(registry_impl->interrupt_pipe_out);
+@@ -144,7 +153,7 @@
+ 	registry_impl_t *registry_impl = registry->impl;
+ 	struct pollfd *interrupt_pfd = pfds->pfds;
+ 	assert(interrupt_pfd);
+-#ifdef _WIN32
++#ifdef INTERRUPT_SOCKET
+ 	interrupt_pfd->fd = registry_impl->interrupt_sock;
+ #else
+ 	interrupt_pfd->fd = registry_impl->interrupt_pipe_in;
+@@ -210,7 +219,7 @@
+ int conn_poll_process(conn_registry_t *registry, pfds_record_t *pfds) {
+ 	struct pollfd *interrupt_pfd = pfds->pfds;
+ 	if (interrupt_pfd->revents & POLLIN) {
+-#ifdef _WIN32
++#ifdef INTERRUPT_SOCKET
+ 		char dummy;
+ 		addr_record_t src;
+ 		while (udp_recvfrom(interrupt_pfd->fd, &dummy, 1, &src) >= 0) {
+@@ -378,7 +387,7 @@
+ 	JLOG_VERBOSE("Interrupting connections thread");
+ 
+ 	char dummy = 0;
+-#ifdef _WIN32
++#ifdef INTERRUPT_SOCKET
+ 	if (udp_sendto_self(registry_impl->interrupt_sock, &dummy, 0) < 0) {
+ 		if (sockerrno != SEAGAIN && sockerrno != SEWOULDBLOCK) {
+ 			JLOG_WARN("Failed to interrupt poll by triggering socket, errno=%d", sockerrno);

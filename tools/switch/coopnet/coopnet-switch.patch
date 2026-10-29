@@ -1,0 +1,46 @@
+--- a/common/socket.cpp	2026-10-29 12:00:09.796324533 -0500
++++ b/common/socket.cpp	2026-10-29 12:00:09.814907936 -0500
+@@ -125,7 +125,11 @@
+ 
+ #include <sys/ioctl.h>
+ #include <net/if.h>
++#ifdef __SWITCH__
++#include <switch.h>
++#else
+ #include <ifaddrs.h>
++#endif
+ 
+ int SocketInitialize(int aAf, int aType, int aProtocol) {
+     return socket(aAf, aType, aProtocol);
+@@ -171,6 +175,24 @@
+     }
+ }
+ 
++#ifdef __SWITCH__
++// No getifaddrs() on Switch: use the console's Wi-Fi MAC address, combined like the MACs above
++uint64_t SocketGetInfoBits(int aSocket) {
++    uint64_t info = SOCKET_DEFAULT_INFO;
++    SetCalMacAddress mac;
++    if (R_SUCCEEDED(setcalInitialize())) {
++        if (R_SUCCEEDED(setcalGetWirelessLanMacAddress(&mac))) {
++            uint64_t value = 0;
++            for (int i = 0; i < 6; i++) {
++                value ^= ((uint64_t)mac.addr[i]) << (8 * i);
++            }
++            info += value;
++        }
++        setcalExit();
++    }
++    return SocketAddHash(info);
++}
++#else
+ uint64_t SocketGetInfoBits(int aSocket) {
+     struct ifaddrs* ifaddr = NULL;
+     struct ifaddrs* ifa = NULL;
+@@ -218,5 +240,6 @@
+     info = SocketAddHash(info);
+     return info;
+ }
++#endif // __SWITCH__
+ 
+ #endif
