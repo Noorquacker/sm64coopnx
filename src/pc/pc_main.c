@@ -60,6 +60,7 @@
 
 #ifdef TARGET_SWITCH
 #include "switch/gfx_switch.h"
+#include "switch/audio_switch.h"
 #endif
 
 #ifdef DISCORD_SDK
@@ -233,7 +234,7 @@ static void select_graphics_backend(void) {
 #if defined(TARGET_SWITCH)
     gWindowApi = &gfx_switch_wm;
     gRenderApi = &gfx_deko3d_api;
-    gAudioApi  = &audio_sdl;
+    gAudioApi  = &audio_switch;
 #else
     int backend = configGraphicsBackend;
 #if defined(_WIN32)

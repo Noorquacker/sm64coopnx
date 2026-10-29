@@ -13,6 +13,9 @@
 #include "pc/pc_main.h"
 #include "pc/fs/fmem.h"
 #include "audio/load.h"
+#ifdef TARGET_SWITCH
+#include "pc/switch/audio_switch.h"
+#endif
 
 struct AudioOverride {
     bool enabled;
@@ -189,14 +192,48 @@ static ma_engine sModAudioEngine;
 static struct DynamicPool *sModAudioPool;
 static bool sModAudioShuttingDown = false;
 
+#ifdef TARGET_SWITCH
+static bool sModAudioEngineInited = false;
+#endif
+
 static void smlua_audio_custom_init(void) {
     sModAudioPool = dynamic_pool_init();
 
+#ifdef TARGET_SWITCH
+    // miniaudio has no playback device on Switch: the engine runs without one, at the game's
+    // output format, and is mixed into the game's audio (src/pc/switch/audio_switch.c)
+    ma_engine_config config = ma_engine_config_init();
+    config.noDevice   = MA_TRUE;
+    config.channels   = 2;
+    config.sampleRate = 32000;
+    ma_result result = ma_engine_init(&config, &sModAudioEngine);
+    sModAudioEngineInited = (result == MA_SUCCESS);
+#else
     ma_result result = ma_engine_init(NULL, &sModAudioEngine);
+#endif
     if (result != MA_SUCCESS) {
         LOG_ERROR("failed to init Miniaudio: %d", result);
     }
 }
+
+#ifdef TARGET_SWITCH
+void smlua_audio_custom_mix(int16_t *samples, uint32_t frames) {
+    if (!sModAudioEngineInited) { return; }
+
+    f32 mixed[512 * 2];
+    while (frames > 0) {
+        ma_uint64 count = MIN(frames, 512);
+        ma_uint64 read = 0;
+        if (ma_engine_read_pcm_frames(&sModAudioEngine, mixed, count, &read) != MA_SUCCESS) { return; }
+        for (ma_uint64 i = 0; i < read * 2; i++) {
+            s32 sample = samples[i] + (s32) (mixed[i] * 32767.0f);
+            samples[i] = (s16) MAX(-32768, MIN(32767, sample));
+        }
+        samples += count * 2;
+        frames -= count;
+    }
+}
+#endif
 
 static struct ModAudio* find_mod_audio(const char *filepath) {
     struct DynamicPoolNode* node = sModAudioPool->tail;
@@ -846,6 +883,9 @@ void smlua_audio_custom_deinit(void) {
         sModAudioShuttingDown = true;
         pthread_mutex_unlock(&sSampleCopyMutex);
 
+#ifdef TARGET_SWITCH
+        sModAudioEngineInited = false;
+#endif
         ma_engine_uninit(&sModAudioEngine);
 
         audio_custom_shutdown();
