@@ -100,6 +100,19 @@ static void switch_init_logging(void) {
     setvbuf(stderr, NULL, _IONBF, 0);
 }
 
+static pthread_t sStatsThread;
+static bool sStatsThreadRunning = false;
+static volatile bool sStatsThreadStop = false;
+
+// sleeps for a second in short steps, returns false once the thread should stop
+static bool switch_stats_sleep(void) {
+    for (int i = 0; i < 10; i++) {
+        if (sStatsThreadStop) { return false; }
+        usleep(100 * 1000);
+    }
+    return !sStatsThreadStop;
+}
+
 // periodically logs game ticks, presented frames per second and heap use,
 // and checks every second for a framebuffer capture request
 static void *switch_stats_thread(void *arg) {
@@ -108,9 +121,7 @@ static void *switch_stats_thread(void *arg) {
     u32 lastPresents = gfx_deko3d_get_present_count();
     char captureTrigger[SYS_MAX_PATH];
     snprintf(captureTrigger, sizeof(captureTrigger), "%s/capture", sUserDir);
-    for (u32 seconds = 1; ; seconds++) {
-        sleep(1);
-
+    for (u32 seconds = 1; switch_stats_sleep(); seconds++) {
         // commit the log file once a second, so the last lines survive a crash
         if (sNxlinkSocket < 0) {
             fflush(stdout);
@@ -139,6 +150,15 @@ static void *switch_stats_thread(void *arg) {
         lastPresents = presents;
     }
     return NULL;
+}
+
+// When the game quits back to hbmenu, the process keeps running hbmenu's code: a thread
+// left behind would wake up in unloaded code and crash the console. Join it before exiting.
+static void switch_stop_stats_thread(void) {
+    if (!sStatsThreadRunning) { return; }
+    sStatsThreadStop = true;
+    pthread_join(sStatsThread, NULL);
+    sStatsThreadRunning = false;
 }
 
 // Development aid: hbmenu and yuzu can't pass command line options, so if <user dir>/args.txt
@@ -194,9 +214,10 @@ void userAppInit(void) {
     }
     switch_load_args_file();
 
-    pthread_t statsThread;
-    if (pthread_create(&statsThread, NULL, switch_stats_thread, NULL) == 0) {
-        pthread_detach(statsThread);
+    if (pthread_create(&sStatsThread, NULL, switch_stats_thread, NULL) == 0) {
+        sStatsThreadRunning = true;
+        // before stdio is closed (atexit handlers run first)
+        atexit(switch_stop_stats_thread);
     }
 }
 
