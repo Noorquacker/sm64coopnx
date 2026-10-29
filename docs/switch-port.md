@@ -127,7 +127,8 @@ until a renderer exists; gate or remove it later.
 | Host a game (single-player) on Switch | ✅ in yuzu (needed IPv4 sockets, below) |
 | Hardware, handheld: playable, steady 60 fps, no validation errors, cached shaders load at boot | ✅ |
 | Hardware: new combiners compile in **90–135 ms** each (~3× yuzu); several in a row cause a visible hitch | known, Phase 7 (prebuilt cache in romfs / compile ahead) |
-| Hardware: quitting from the menu crashed the console | fixed: the stats thread outlived the NRO when returning to hbmenu (found via the Atmosphère crash report) |
+| Hardware: quitting from the menu crashed the console | fixed, two causes: the stats thread outlived the NRO when returning to hbmenu (found via the Atmosphère crash report), then `dkDeviceDestroy: unfreed memory blocks` because shutdown didn't free the texture/shader heaps (reproduced and verified in yuzu with the `quit` trigger) |
+| Hardware: A/B swapped (B jumped and confirmed) | fixed: devkitPro's SDL maps Switch buttons by position (Xbox layout); `gfx_switch_wm.c` registers a by-label mapping, so A jumps/confirms and B punches/goes back |
 | Hardware, docked | not yet tested |
 
 ### Shared GLSL generator (upstream candidate)
@@ -196,6 +197,8 @@ Packets are identical, and a PC's dual-stack socket talks to IPv4 peers natively
   through Castle Grounds, Bob-omb Battlefield, the CCM slide and Bowser in the Dark World, and prints a marker in
   each). It runs this on the PC GL build on a virtual X display (Xvfb, forced to X11, with a temporary
   `--savepath`) and on the Switch build in yuzu (captures via the trigger file), then writes side-by-side PNGs.
+- **`quit` trigger:** an empty `quit` file in the user dir quits the game the normal way (`game_exit()`), so the
+  exit path, including deko3d's leak checks, can be tested in yuzu.
 - `log.txt` is `fsync`ed once a second, so the last lines survive a crash. In yuzu, lines can still reach the host
   file ~10 s late (yuzu's own buffering), so the render test holds each scene for 40 s.
 

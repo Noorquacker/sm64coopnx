@@ -6,8 +6,18 @@
 #include <string.h>
 
 #include <switch.h>
+#include <SDL2/SDL.h>
 
 #include "gfx_switch.h"
+#include "platform_switch.h"
+
+// devkitPro's SDL maps the Switch buttons by position, Xbox style (the button labeled B is SDL's A).
+// coopdx binds by SDL name (N64 A = SDL A, N64 B = SDL B), so map them by label instead:
+// A jumps and confirms in menus, B punches and goes back.
+#define SWITCH_CONTROLLER_MAPPING \
+    "000038f853776974636820436f6e7400,Switch Controller," \
+    "a:b0,b:b1,x:b2,y:b3,back:b11,start:b10,leftshoulder:b6,rightshoulder:b7,lefttrigger:b8,righttrigger:b9," \
+    "leftstick:b4,rightstick:b5,dpup:b13,dpdown:b15,dpleft:b12,dpright:b14,leftx:a0,lefty:a1,rightx:a2,righty:a3,"
 
 // game functions, declared here since game headers can't be included
 void controller_bind_init(void);
@@ -42,6 +52,8 @@ static void gfx_switch_wm_init(const char *window_title) {
     (void) window_title;
     gfx_deko3d_set_native_window(nwindowGetDefault());
     gfx_switch_wm_update_output_size();
+    // read when SDL's game controller subsystem starts, which happens later (controller_sdl.c)
+    SDL_SetHint(SDL_HINT_GAMECONTROLLERCONFIG, SWITCH_CONTROLLER_MAPPING);
     controller_bind_init();
 }
 
@@ -69,7 +81,7 @@ static void gfx_switch_wm_get_dimensions(uint32_t *width, uint32_t *height) {
 
 static void gfx_switch_wm_handle_events(void) {
     // processes applet messages; blocks while suspended in the HOME menu
-    if (!appletMainLoop()) {
+    if (!appletMainLoop() || switch_quit_requested()) {
         game_exit();
     }
 
