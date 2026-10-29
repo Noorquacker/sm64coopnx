@@ -203,6 +203,23 @@ Packets are identical, and a PC's dual-stack socket talks to IPv4 peers natively
 - `log.txt` is `fsync`ed once a second, so the last lines survive a crash. In yuzu, lines can still reach the host
   file ~10 s late (yuzu's own buffering), so the render test holds each scene for 40 s.
 
+## Phase 4 (input, text entry, audio, display) — in progress
+
+- **Text input:** when a DJUI text field (chat, player name, IP, …) gets focus, the Switch window manager opens
+  the system keyboard on the next `handle_events()`, prefilled with the field's text. The result replaces the text
+  and Enter confirms it (sends the chat message, …); cancelling presses Esc. It all goes through DJUI's normal
+  keyboard callbacks: Ctrl+A/Ctrl+C fetch the text through the window manager's clipboard functions. So there
+  are no shared DJUI changes, and nothing runs inside DJUI's own focus callback.
+- **Mod audio:** Lua mods play sounds through miniaudio, which has no playback device on Switch (only its null
+  backend), so they were silent. On Switch the miniaudio engine runs without a device at the game's output format
+  (stereo 32 kHz), and `audio_switch` mixes it into the game's SDL audio. Verified in yuzu with a streamed song.
+- **Controllers (devkitPro SDL, from its source):** handheld, Joy-Con pair and Pro Controller have full analog
+  input, and SDL shows the system controller setup applet by itself when controllers change. A **single Joy-Con
+  held sideways only reports its stick as four digital directions**, which isn't enough to play. There's also no
+  gyro, and trigger rumble is unsupported. A native libnx controller backend would fix all three.
+- **Display:** DJUI's automatic scale is 1.0 at 720p and 1080p (panels are sized in pixels, so they cover more of
+  the handheld screen). There's a manual scale in the options.
+
 Base: upstream coopdx at `8cd6e5977` ("Update updater libs"), network version `v42.1`
 (`src/pc/network/version.h`). The Switch build must keep this version so it can play with PC clients.
 
@@ -428,7 +445,8 @@ These are guesses until measured on hardware.
 | CoopNet | no aarch64-switch build yet (Phase 5); `COOPNET=1` errors out | `switch.mk` |
 | Mumble positional audio | needs POSIX shared memory | `mumble.c` |
 | `open_url` / `open_folder` | no process spawning (may use the `webWifi` applet later) | compile to no-ops |
-| Keyboard/text input, clipboard | software keyboard in Phase 4 | `gfx_switch_wm.c` stubs |
+| Clipboard | in-game only (Ctrl+C/Ctrl+V between DJUI fields), no system clipboard on Switch | `gfx_switch_wm.c` |
+| Single Joy-Con play | SDL reports its stick as digital directions only (needs a native libnx backend) | — |
 | MSAA | not implemented (`get_max_msaa` returns 0) | `gfx_switch_wm.c` |
 
 The **update checker stays on**: it only shows an "update available" popup and fails quietly when offline.
