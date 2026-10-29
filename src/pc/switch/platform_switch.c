@@ -100,15 +100,34 @@ static void switch_init_logging(void) {
     setvbuf(stderr, NULL, _IONBF, 0);
 }
 
-// periodically logs game ticks, presented frames per second and heap use
+// periodically logs game ticks, presented frames per second and heap use,
+// and checks every second for a framebuffer capture request
 static void *switch_stats_thread(void *arg) {
     (void) arg;
     u32 lastTimer = gGlobalTimer;
     u32 lastPresents = gfx_deko3d_get_present_count();
     char captureTrigger[SYS_MAX_PATH];
     snprintf(captureTrigger, sizeof(captureTrigger), "%s/capture", sUserDir);
-    while (true) {
-        sleep(SWITCH_STATS_INTERVAL_SECONDS);
+    for (u32 seconds = 1; ; seconds++) {
+        sleep(1);
+
+        // commit the log file once a second, so the last lines survive a crash
+        if (sNxlinkSocket < 0) {
+            fflush(stdout);
+            fsync(fileno(stdout));
+        }
+
+        // debug: creating an empty "capture" file in the user dir saves the next frame
+        // (checked with stat first: yuzu's remove() reports success for missing files)
+        struct stat st;
+        if (stat(captureTrigger, &st) == 0 && remove(captureTrigger) == 0) {
+            char path[SYS_MAX_PATH];
+            snprintf(path, sizeof(path), "%s/capture_%u.ppm", sUserDir, gfx_deko3d_get_present_count());
+            printf("[switch] capture requested at game tick %u\n", gGlobalTimer);
+            gfx_deko3d_request_capture(path);
+        }
+
+        if (seconds % SWITCH_STATS_INTERVAL_SECONDS != 0) { continue; }
         struct mallinfo mi = mallinfo();
         u32 timer = gGlobalTimer;
         u32 presents = gfx_deko3d_get_present_count();
@@ -118,17 +137,37 @@ static void *switch_stats_thread(void *arg) {
                (unsigned long)(mi.uordblks / (1024 * 1024)));
         lastTimer = timer;
         lastPresents = presents;
-
-        // debug: creating an empty "capture" file in the user dir saves the next frame
-        // (checked with stat first: yuzu's remove() reports success for missing files)
-        struct stat st;
-        if (stat(captureTrigger, &st) == 0 && remove(captureTrigger) == 0) {
-            char path[SYS_MAX_PATH];
-            snprintf(path, sizeof(path), "%s/capture_%u.ppm", sUserDir, presents);
-            gfx_deko3d_request_capture(path);
-        }
     }
     return NULL;
+}
+
+// Development aid: hbmenu and yuzu can't pass command line options, so if <user dir>/args.txt
+// exists its whitespace separated contents replace the command line (e.g. "--server 7777").
+// libnx calls main() with __system_argc/__system_argv after userAppInit().
+static void switch_load_args_file(void) {
+    char path[SYS_MAX_PATH];
+    snprintf(path, sizeof(path), "%s/args.txt", sUserDir);
+    FILE *f = fopen(path, "r");
+    if (!f) { return; }
+
+    static char contents[1024];
+    size_t len = fread(contents, 1, sizeof(contents) - 1, f);
+    fclose(f);
+    contents[len] = '\0';
+
+    static char *argv[64];
+    int argc = 0;
+    argv[argc++] = (__system_argc > 0 && __system_argv) ? __system_argv[0] : "sm64coopnx";
+    for (char *token = strtok(contents, " \t\r\n"); token && argc < 63; token = strtok(NULL, " \t\r\n")) {
+        argv[argc++] = token;
+    }
+    argv[argc] = NULL;
+
+    __system_argc = argc;
+    __system_argv = argv;
+    printf("Using command line options from %s:", path);
+    for (int i = 1; i < argc; i++) { printf(" %s", argv[i]); }
+    printf("\n");
 }
 
 // called by libnx before main()
@@ -153,6 +192,7 @@ void userAppInit(void) {
     } else if (migration == MIGRATION_FAILED) {
         printf("Could not move " SWITCH_LEGACY_USER_DIR " to " SWITCH_USER_DIR ", still using the old folder\n");
     }
+    switch_load_args_file();
 
     pthread_t statsThread;
     if (pthread_create(&statsThread, NULL, switch_stats_thread, NULL) == 0) {

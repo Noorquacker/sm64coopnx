@@ -41,8 +41,10 @@ ifeq ($(origin COOPNET)$(COOPNET),command line1)
 endif
 override COOPNET := 0
 
-# SDL window + OpenGL backend: replaced by the deko3d backend (Phases 2-3)
+# SDL window + OpenGL backend: replaced by the deko3d backend (src/pc/switch/gfx_*)
 SWITCH_EXCLUDED_C_FILES := src/pc/gfx/gfx_opengl.c src/pc/gfx/gfx_sdl.c
+# dual-stack IPv6 sockets: the Switch only has IPv4 (src/pc/switch/socket_switch.c)
+SWITCH_EXCLUDED_C_FILES += src/pc/network/socket/socket.c src/pc/network/socket/socket_linux.c
 
 override BUILD_DIR := build/$(VERSION)_nx
 override EXE       := $(BUILD_DIR)/sm64coopnx.elf
