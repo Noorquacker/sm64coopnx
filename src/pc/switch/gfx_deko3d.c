@@ -1112,9 +1112,41 @@ static const char *gfx_deko3d_get_name(void) {
     return "deko3d";
 }
 
+static void heap_destroy(struct Heap *heap) {
+    for (uint32_t i = 0; i < heap->numChunks; i++) {
+        dkMemBlockDestroy(heap->chunks[i].mem);
+        free(heap->chunks[i].free);
+    }
+    heap->numChunks = 0;
+}
+
 static void gfx_deko3d_shutdown(void) {
     if (!sDevice) { return; }
+
+    // the game can quit in the middle of a frame: finish it so no swapchain image stays acquired
+    if (sFrameActive) {
+        dkQueueSubmitCommands(sQueue, dkCmdBufFinishList(sCmdBuf));
+        sFrameActive = false;
+    }
+    gfx_deko3d_present();
     dkQueueWaitIdle(sQueue);
+
+    // every memory block must be destroyed before the device (the validating library checks)
+    for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        gfx_deko3d_collect_garbage(i);
+        free(sGarbage[i].allocs);
+        free(sGarbage[i].blocks);
+        memset(&sGarbage[i], 0, sizeof(sGarbage[i]));
+    }
+    heap_destroy(&sTextureHeap);
+    heap_destroy(&sCodeHeap);
+    if (sCaptureMem) {
+        dkMemBlockDestroy(sCaptureMem);
+        sCaptureMem = NULL;
+    }
+    free(sTextures);
+    sTextures = NULL;
+
     dkQueueDestroy(sQueue);
     dkCmdBufDestroy(sCmdBuf);
     dkMemBlockDestroy(sTransientMem);

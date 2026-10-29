@@ -100,6 +100,12 @@ static void switch_init_logging(void) {
     setvbuf(stderr, NULL, _IONBF, 0);
 }
 
+static volatile bool sQuitRequested = false;
+
+bool switch_quit_requested(void) {
+    return sQuitRequested;
+}
+
 static pthread_t sStatsThread;
 static bool sStatsThreadRunning = false;
 static volatile bool sStatsThreadStop = false;
@@ -120,7 +126,9 @@ static void *switch_stats_thread(void *arg) {
     u32 lastTimer = gGlobalTimer;
     u32 lastPresents = gfx_deko3d_get_present_count();
     char captureTrigger[SYS_MAX_PATH];
+    char quitTrigger[SYS_MAX_PATH];
     snprintf(captureTrigger, sizeof(captureTrigger), "%s/capture", sUserDir);
+    snprintf(quitTrigger, sizeof(quitTrigger), "%s/quit", sUserDir);
     for (u32 seconds = 1; switch_stats_sleep(); seconds++) {
         // commit the log file once a second, so the last lines survive a crash
         if (sNxlinkSocket < 0) {
@@ -136,6 +144,12 @@ static void *switch_stats_thread(void *arg) {
             snprintf(path, sizeof(path), "%s/capture_%u.ppm", sUserDir, gfx_deko3d_get_present_count());
             printf("[switch] capture requested at game tick %u\n", gGlobalTimer);
             gfx_deko3d_request_capture(path);
+        }
+
+        // debug: a "quit" file quits the game the normal way, to test the exit path (in yuzu too)
+        if (stat(quitTrigger, &st) == 0 && remove(quitTrigger) == 0) {
+            printf("[switch] quit requested\n");
+            sQuitRequested = true;
         }
 
         if (seconds % SWITCH_STATS_INTERVAL_SECONDS != 0) { continue; }

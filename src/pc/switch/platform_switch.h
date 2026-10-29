@@ -15,6 +15,9 @@ extern "C" {
 // std::filesystem::copy_file needs fchmod(), which libnx doesn't implement
 bool switch_copy_file(const char *srcPath, const char *dstPath);
 
+// debug: true once a "quit" file was created in the user dir (the window manager then quits the game)
+bool switch_quit_requested(void);
+
 // shows a system error dialog, then exits
 void switch_fatal(const char *msg) __attribute__ ((noreturn));
 
