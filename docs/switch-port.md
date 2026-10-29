@@ -1,8 +1,8 @@
 # sm64coopnx — sm64coopdx for Nintendo Switch (deko3d)
 
-Status: **Phase 3 done** (verified in yuzu and on hardware). The game renders through deko3d, matches the PC
-OpenGL build in the reference scenes, runs at 60 fps handheld, hosts over IPv4, and exits cleanly. Phase 4 (input,
-text entry, audio, display) is next. Docked play on hardware is still to be checked.
+Status: **Phase 4 done** (verified on hardware). The game renders through deko3d, plays handheld and docked,
+hosts over IPv4, has the software keyboard for text fields, chat on R3, and mod audio. Phase 5 (networking:
+PC interoperability, CoopNet, mod downloads) is next.
 
 ## Building
 
@@ -130,7 +130,7 @@ until a renderer exists; gate or remove it later.
 | Hardware: quitting from the menu crashed the console | fixed, two causes: the stats thread outlived the NRO when returning to hbmenu (found via the Atmosphère crash report), then `dkDeviceDestroy: unfreed memory blocks` because shutdown didn't free the texture/shader heaps (reproduced and verified in yuzu with the `quit` trigger) |
 | Hardware: A/B swapped (B jumped and confirmed) | fixed: devkitPro's SDL maps Switch buttons by position (Xbox layout); `gfx_switch_wm.c` registers a by-label mapping, so A jumps/confirms and B punches/goes back |
 | Hardware: quit from the menu, A/B by label | ✅ confirmed after the fixes below |
-| Hardware, docked | not yet tested |
+| Hardware, docked (1080p) | ✅ |
 
 ### Shared GLSL generator (upstream candidate)
 
@@ -203,7 +203,7 @@ Packets are identical, and a PC's dual-stack socket talks to IPv4 peers natively
 - `log.txt` is `fsync`ed once a second, so the last lines survive a crash. In yuzu, lines can still reach the host
   file ~10 s late (yuzu's own buffering), so the render test holds each scene for 40 s.
 
-## Phase 4 (input, text entry, audio, display) — in progress
+## Phase 4 (input, text entry, audio, display) — done
 
 - **Text input:** when a DJUI text field (chat, player name, IP, …) gets focus, the Switch window manager opens
   the system keyboard on the next `handle_events()`, prefilled with the field's text. The result replaces the text
@@ -221,6 +221,11 @@ Packets are identical, and a PC's dual-stack socket talks to IPv4 peers natively
   input, and SDL shows the system controller setup applet by itself when controllers change. A **single Joy-Con
   held sideways only reports its stick as four digital directions**, which isn't enough to play. There's also no
   gyro, and trigger rumble is unsupported. A native libnx controller backend would fix all three.
+- **Single Joy-Con: not supported, by decision.** coopdx has one local player per console (no split screen), so a
+  Joy-Con pair (or handheld/Pro Controller) is assumed. Revisit with a native libnx backend if gyro or HD rumble
+  are wanted.
+- **Verified on hardware:** chat and player name through the keyboard, mod audio, handheld and docked play,
+  menus readable at both resolutions.
 - **Display:** DJUI's automatic scale is 1.0 at 720p and 1080p (panels are sized in pixels, so they cover more of
   the handheld screen). There's a manual scale in the options.
 
@@ -450,7 +455,7 @@ These are guesses until measured on hardware.
 | Mumble positional audio | needs POSIX shared memory | `mumble.c` |
 | `open_url` / `open_folder` | no process spawning (may use the `webWifi` applet later) | compile to no-ops |
 | Clipboard | in-game only (Ctrl+C/Ctrl+V between DJUI fields), no system clipboard on Switch | `gfx_switch_wm.c` |
-| Single Joy-Con play | SDL reports its stick as digital directions only (needs a native libnx backend) | — |
+| Single Joy-Con play | not supported by decision (one local player; SDL reports its stick as digital directions only) | — |
 | MSAA | not implemented (`get_max_msaa` returns 0) | `gfx_switch_wm.c` |
 
 The **update checker stays on**: it only shows an "update available" popup and fails quietly when offline.
