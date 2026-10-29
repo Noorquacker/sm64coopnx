@@ -16,9 +16,6 @@
 #define SWITCH_DOCKED_WIDTH    1920
 #define SWITCH_DOCKED_HEIGHT   1080
 
-// precompiled shaders (switch.mk compiles res/switch/shaders with uam)
-#define SWITCH_SHADER_DIR "romfs:/shaders"
-
 extern struct GfxWindowManagerAPI gfx_switch_wm;
 extern struct GfxRenderingAPI gfx_deko3d_api;
 
