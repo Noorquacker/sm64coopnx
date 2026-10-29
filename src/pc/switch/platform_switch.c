@@ -17,9 +17,7 @@
 #include "platform_switch.h"
 #include "gfx_switch.h"
 
-#define SWITCH_LOG_FILE SWITCH_USER_DIR "/log.txt"
 #define SWITCH_STATS_INTERVAL_SECONDS 10
-#define SWITCH_CAPTURE_TRIGGER SWITCH_USER_DIR "/capture"
 
 extern int __system_argc;
 extern char **__system_argv;
@@ -27,6 +25,30 @@ extern char **__system_argv;
 extern u32 gGlobalTimer; // game/display.h
 
 static int sNxlinkSocket = -1;
+
+// SWITCH_USER_DIR, or SWITCH_LEGACY_USER_DIR if it couldn't be moved
+static const char *sUserDir = SWITCH_USER_DIR;
+
+enum UserDirMigration { MIGRATION_NONE, MIGRATION_MOVED, MIGRATION_FAILED };
+
+// Moves data from before the rename to sm64coopnx. If that fails (yuzu doesn't implement
+// directory renames), keep using the old folder rather than starting over in a new one.
+static enum UserDirMigration switch_init_user_dir(void) {
+    enum UserDirMigration migration = MIGRATION_NONE;
+    struct stat st;
+
+    mkdir("sdmc:/switch", 0777);
+    if (stat(SWITCH_USER_DIR, &st) != 0 && stat(SWITCH_LEGACY_USER_DIR, &st) == 0) {
+        if (rename(SWITCH_LEGACY_USER_DIR, SWITCH_USER_DIR) == 0) {
+            migration = MIGRATION_MOVED;
+        } else {
+            sUserDir = SWITCH_LEGACY_USER_DIR;
+            migration = MIGRATION_FAILED;
+        }
+    }
+    mkdir(sUserDir, 0777);
+    return migration;
+}
 
 // Applet mode (launched from the album) only gets a small slice of memory,
 // not enough for the game. Ask the user to relaunch through title takeover.
@@ -39,7 +61,7 @@ static void switch_check_applet_mode(void) {
     PadState pad;
     padInitializeDefault(&pad);
 
-    printf("\n  sm64coopdx is running in applet mode.\n\n");
+    printf("\n  sm64coopnx is running in applet mode.\n\n");
     printf("  Applet mode does not have enough memory to run the game.\n");
     printf("  Launch it through title takeover instead: hold R while\n");
     printf("  starting any game, then open the Homebrew Menu.\n\n");
@@ -67,10 +89,12 @@ static void switch_init_logging(void) {
     }
     if (sNxlinkSocket < 0) {
         // truncate once, then append from both streams so neither overwrites the other
-        FILE *log = fopen(SWITCH_LOG_FILE, "w");
+        char logPath[SYS_MAX_PATH];
+        snprintf(logPath, sizeof(logPath), "%s/log.txt", sUserDir);
+        FILE *log = fopen(logPath, "w");
         if (log) { fclose(log); }
-        freopen(SWITCH_LOG_FILE, "a", stdout);
-        freopen(SWITCH_LOG_FILE, "a", stderr);
+        freopen(logPath, "a", stdout);
+        freopen(logPath, "a", stderr);
     }
     setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -81,6 +105,8 @@ static void *switch_stats_thread(void *arg) {
     (void) arg;
     u32 lastTimer = gGlobalTimer;
     u32 lastPresents = gfx_deko3d_get_present_count();
+    char captureTrigger[SYS_MAX_PATH];
+    snprintf(captureTrigger, sizeof(captureTrigger), "%s/capture", sUserDir);
     while (true) {
         sleep(SWITCH_STATS_INTERVAL_SECONDS);
         struct mallinfo mi = mallinfo();
@@ -96,9 +122,9 @@ static void *switch_stats_thread(void *arg) {
         // debug: creating an empty "capture" file in the user dir saves the next frame
         // (checked with stat first: yuzu's remove() reports success for missing files)
         struct stat st;
-        if (stat(SWITCH_CAPTURE_TRIGGER, &st) == 0 && remove(SWITCH_CAPTURE_TRIGGER) == 0) {
-            char path[64];
-            snprintf(path, sizeof(path), SWITCH_USER_DIR "/capture_%u.ppm", presents);
+        if (stat(captureTrigger, &st) == 0 && remove(captureTrigger) == 0) {
+            char path[SYS_MAX_PATH];
+            snprintf(path, sizeof(path), "%s/capture_%u.ppm", sUserDir, presents);
             gfx_deko3d_request_capture(path);
         }
     }
@@ -112,18 +138,21 @@ void userAppInit(void) {
     socketInitializeDefault();
     romfsInit();
 
-    mkdir("sdmc:/switch", 0777);
-    mkdir(SWITCH_USER_DIR, 0777);
-
+    enum UserDirMigration migration = switch_init_user_dir();
     switch_init_logging();
 
     appletSetFocusHandlingMode(AppletFocusHandlingMode_SuspendHomeSleep);
 
     u64 totalMem = 0;
     svcGetInfo(&totalMem, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
-    printf("sm64coopdx for Nintendo Switch: applet type %d, %lu MiB of memory, %s\n",
+    printf("sm64coopnx for Nintendo Switch: applet type %d, %lu MiB of memory, %s\n",
            (int)appletGetAppletType(), (unsigned long)(totalMem / (1024 * 1024)),
            envIsNso() ? "launched as NSO" : "launched by hbloader");
+    if (migration == MIGRATION_MOVED) {
+        printf("Moved user data from " SWITCH_LEGACY_USER_DIR " to " SWITCH_USER_DIR "\n");
+    } else if (migration == MIGRATION_FAILED) {
+        printf("Could not move " SWITCH_LEGACY_USER_DIR " to " SWITCH_USER_DIR ", still using the old folder\n");
+    }
 
     pthread_t statsThread;
     if (pthread_create(&statsThread, NULL, switch_stats_thread, NULL) == 0) {
@@ -144,7 +173,7 @@ void userAppExit(void) {
 }
 
 const char *sys_user_path(void) {
-    return SWITCH_USER_DIR;
+    return sUserDir;
 }
 
 const char *sys_resource_path(void) {
@@ -169,7 +198,7 @@ const char *sys_exe_path_dir(void) {
         snprintf(path, sizeof(path), "%.*s", (int)(lastSeparator - exeFilepath), exeFilepath);
     } else {
         // the ROM scan iterates this directory, so it must exist
-        snprintf(path, sizeof(path), "%s", SWITCH_USER_DIR);
+        snprintf(path, sizeof(path), "%s", sUserDir);
     }
 
     return path;
@@ -206,7 +235,7 @@ void switch_fatal(const char *msg) {
     fflush(stderr);
 
     ErrorApplicationConfig config;
-    if (R_SUCCEEDED(errorApplicationCreate(&config, "sm64coopdx encountered a fatal error.", msg))) {
+    if (R_SUCCEEDED(errorApplicationCreate(&config, "sm64coopnx encountered a fatal error.", msg))) {
         errorApplicationShow(&config);
     }
 

@@ -3,7 +3,9 @@
 
 #include <stdbool.h>
 
-#define SWITCH_USER_DIR "sdmc:/switch/sm64coopdx"
+#define SWITCH_USER_DIR "sdmc:/switch/sm64coopnx"
+// user dir used before the project was renamed, moved to SWITCH_USER_DIR on first launch
+#define SWITCH_LEGACY_USER_DIR "sdmc:/switch/sm64coopdx"
 #define SWITCH_RESOURCE_DIR "romfs:"
 
 #ifdef __cplusplus

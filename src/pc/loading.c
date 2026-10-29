@@ -188,7 +188,7 @@ void render_rom_setup_screen(void) {
     if (!sLoading) { init_loading_screen(); }
 
 #ifdef TARGET_SWITCH
-    loading_screen_set_segment_text("No rom detected, copy Super Mario 64 (U) [!].z64 to sdmc:/switch/sm64coopdx/ and restart");
+    loading_screen_set_segment_text("No rom detected, copy Super Mario 64 (U) [!].z64 to sdmc:/switch/sm64coopnx/ and restart");
 #else
     loading_screen_set_segment_text("No rom detected, drag & drop Super Mario 64 (U) [!].z64 on to this screen");
 #endif

@@ -5,8 +5,8 @@
 # lives here so upstream Makefile changes merge cleanly. Variables that the
 # Makefile assigns later are pinned with 'override'.
 #
-#   make TARGET_SWITCH=1                      -> build/us_nx/sm64coopdx.nro
-#   make TARGET_SWITCH=1 nsp KEYS=prod.keys   -> build/us_nx/sm64coopdx.nsp
+#   make TARGET_SWITCH=1                      -> build/us_nx/sm64coopnx.nro
+#   make TARGET_SWITCH=1 nsp KEYS=prod.keys   -> build/us_nx/sm64coopnx.nsp
 
 ifeq ($(strip $(DEVKITPRO)),)
   $(error DEVKITPRO is not set. Install devkitPro and export DEVKITPRO=/opt/devkitpro)
@@ -18,13 +18,13 @@ DKP_TOOLS := $(DEVKITPRO)/tools/bin
 
 VERSION ?= us
 
-SWITCH_TITLE    ?= sm64coopdx
+SWITCH_TITLE    ?= sm64coopnx
 SWITCH_AUTHOR   ?= coop-deluxe
 SWITCH_VERSION  ?= $(shell awk '/define VERSION_NUMBER/{a=$$3} /define MINOR_VERSION_NUMBER/{b=$$3} END{print "v" a "." b}' src/pc/network/version.h)
 # Arbitrary homebrew application ID used for the NSP (low 12 bits must be zero)
 SWITCH_TITLE_ID ?= 0100C0DE5A640000
 SWITCH_ICON     ?= res/switch/icon.jpg
-SWITCH_NPDM     ?= res/switch/sm64coopdx.json
+SWITCH_NPDM     ?= res/switch/sm64coopnx.json
 
 # Features with no Switch implementation (see docs/switch-port.md)
 override DISCORD_SDK   := 0
@@ -45,11 +45,11 @@ override COOPNET := 0
 SWITCH_EXCLUDED_C_FILES := src/pc/gfx/gfx_opengl.c src/pc/gfx/gfx_sdl.c
 
 override BUILD_DIR := build/$(VERSION)_nx
-override EXE       := $(BUILD_DIR)/sm64coopdx.elf
-SWITCH_NACP  := $(BUILD_DIR)/sm64coopdx.nacp
+override EXE       := $(BUILD_DIR)/sm64coopnx.elf
+SWITCH_NACP  := $(BUILD_DIR)/sm64coopnx.nacp
 SWITCH_ROMFS := $(BUILD_DIR)/romfs
-SWITCH_NRO   := $(BUILD_DIR)/sm64coopdx.nro
-SWITCH_NSP   := $(BUILD_DIR)/sm64coopdx.nsp
+SWITCH_NRO   := $(BUILD_DIR)/sm64coopnx.nro
+SWITCH_NSP   := $(BUILD_DIR)/sm64coopnx.nsp
 
 # Toolchain
 override CROSS     := $(DEVKITPRO)/devkitA64/bin/aarch64-none-elf-
@@ -71,7 +71,7 @@ else
   DEKO3D_LIB := -ldeko3d
 endif
 
-override LDFLAGS := -specs=$(LIBNX)/switch.specs $(SWITCH_ARCH) -Wl,-Map,$(BUILD_DIR)/sm64coopdx.map \
+override LDFLAGS := -specs=$(LIBNX)/switch.specs $(SWITCH_ARCH) -Wl,-Map,$(BUILD_DIR)/sm64coopnx.map \
                     -Llib/lua/switch -l:liblua53.a \
                     -L$(PORTLIBS)/lib -lcurl -lz $(shell $(SDLCONFIG) --static-libs) \
                     -L$(LIBNX)/lib $(DEKO3D_LIB) -lnx -lm
@@ -132,7 +132,7 @@ endif
 		--nspdir $(BUILD_DIR)/nsp/out
 	$(V)mv $(BUILD_DIR)/nsp/out/*.nsp $@
 
-# Convenience: launch the NRO in yuzu. Put your ROM in <yuzu sdmc>/switch/sm64coopdx/ first.
+# Convenience: launch the NRO in yuzu. Put your ROM in <yuzu sdmc>/switch/sm64coopnx/ first.
 YUZU ?= yuzu
 run-yuzu: $(SWITCH_NRO)
 	$(YUZU) $(SWITCH_NRO)

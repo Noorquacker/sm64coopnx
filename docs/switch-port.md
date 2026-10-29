@@ -1,4 +1,4 @@
-# sm64coopdx — Nintendo Switch port (deko3d)
+# sm64coopnx — sm64coopdx for Nintendo Switch (deko3d)
 
 Status: **Phase 2 done in yuzu (deko3d bring-up).** The game runs on the Switch window manager and the deko3d
 renderer: device, swapchain, per-frame memory and a test triangle presenting at 60 fps. Fast3D drawing is Phase 3.
@@ -10,9 +10,9 @@ Requires devkitPro (`switch-dev`) with `DEVKITPRO` exported, plus `switch-sdl2`,
 builds also need `hacbrewpack` on `PATH`.
 
 ```sh
-make TARGET_SWITCH=1 -j$(nproc)                            # build/us_nx/sm64coopdx.nro
+make TARGET_SWITCH=1 -j$(nproc)                            # build/us_nx/sm64coopnx.nro
 make TARGET_SWITCH=1 DEKO3D_DEBUG=1 -j$(nproc)             # same, with deko3d's validating debug library
-make TARGET_SWITCH=1 nsp KEYS=/path/to/your/prod.keys      # build/us_nx/sm64coopdx.nsp
+make TARGET_SWITCH=1 nsp KEYS=/path/to/your/prod.keys      # build/us_nx/sm64coopnx.nsp
 make TARGET_SWITCH=1 run-yuzu [YUZU=/path/to/yuzu]         # launch the NRO in yuzu
 tools/switch/build_lua.sh                                  # rebuild lib/lua/switch/liblua53.a
 ```
@@ -26,8 +26,8 @@ tools/switch/build_lua.sh                                  # rebuild lib/lua/swi
 ## SD card layout
 
 ```
-sdmc:/switch/sm64coopdx/
-  sm64coopdx.nro          (NRO builds; anywhere under /switch works)
+sdmc:/switch/sm64coopnx/
+  sm64coopnx.nro          (NRO builds; anywhere under /switch works)
   <your US ROM>.z64       any filename; the game finds it by MD5 and copies it to baserom.us.z64
   baserom.us.z64          created on first boot
   sm64config.txt, sav/    config and saves
@@ -41,7 +41,7 @@ Built-in `lang/`, `palettes/`, `mods/`, `dynos/` and `licenses/` ship read-only 
 
 | Check | Result |
 |---|---|
-| NRO builds (`build/us_nx/sm64coopdx.nro`, 87 MB incl. 30 MB built-in mods) | ✅ |
+| NRO builds (`build/us_nx/sm64coopnx.nro`, 87 MB incl. 30 MB built-in mods) | ✅ |
 | NSP builds and boots in yuzu | ✅ |
 | Boots in yuzu as an application, 3285 MiB available | ✅ |
 | ROM found on SD, copied to `baserom.us.z64`, assets loaded | ✅ |
@@ -67,7 +67,7 @@ until a renderer exists; gate or remove it later.
   the game quits. The ROM copy uses `switch_copy_file()` on Switch. Other `std::filesystem` calls used so far
   (`exists`, `directory_iterator`, `rename`) work.
 - **NPDM `debug_flags`:** current npdmtool's `debug_flags` capability makes yuzu refuse the NSP ("unable to parse
-  kernel metadata"), so it's left out of `res/switch/sm64coopdx.json`.
+  kernel metadata"), so it's left out of `res/switch/sm64coopnx.json`.
 - **`TARGET_BITS`:** stays `0` (native). The handoff's `TARGET_BITS=64` would add `-m64`, which aarch64 gcc rejects.
   aarch64 is 64-bit anyway.
 - **Binary size:** the static SDL2 links Mesa's EGL/nouveau even with SDL video unused, because `SDL_Init`
@@ -108,7 +108,7 @@ until a renderer exists; gate or remove it later.
 ### Debug tools
 
 - `log.txt` gets a line every 10 s: game ticks, frames presented, fps, malloc heap.
-- **Framebuffer capture:** create an empty file named `capture` in `sdmc:/switch/sm64coopdx/`. Within 10 s the game
+- **Framebuffer capture:** create an empty file named `capture` in `sdmc:/switch/sm64coopnx/`. Within 10 s the game
   deletes it and writes the next frame's visible region (1920×1080 docked, 1280×720 handheld) to
   `capture_<frame>.ppm`. Readback uses CPU-cached memory and the file is written on a background thread. The first
   version used uncached memory and froze the game for ~3 s on hardware. It works over MTP on hardware (but MTP is
@@ -146,7 +146,7 @@ Base: upstream coopdx at `8cd6e5977` ("Update updater libs"), network version `v
 - **The ROM isn't needed at build time.** `extract_assets.py` is only used by `make distclean`. At runtime,
   `main_rom_handler()` (`src/pc/rom_checker.cpp`) scans the user dir, then the exe dir, for *any* `*.z64` whose
   MD5 matches US. It copies the match to `<user>/baserom.us.z64`. On Switch the user just drops their ROM into
-  `sdmc:/switch/sm64coopdx/`.
+  `sdmc:/switch/sm64coopnx/`.
 - The ROM-missing screen says "drag & drop …". That makes no sense on Switch, so the string needs a Switch variant.
 - Rendering happens on the main thread only. Game init runs on `gLoadingThread` while the main thread renders the
   loading screen (`src/pc/loading.c`, `pc_main.c:556`). deko3d command recording can therefore stay single-threaded.
@@ -221,7 +221,7 @@ window needed). Clipboard, cursor and window title are no-ops. `start_text_input
 
 | Area | Location | Switch issue | Plan |
 |---|---|---|---|
-| User/exe paths | `src/pc/platform.c:299–389` | `/proc/<pid>/exe`, `SDL_GetPrefPath` | Switch branch: user = `sdmc:/switch/sm64coopdx`, resource = `romfs:` (or SD) |
+| User/exe paths | `src/pc/platform.c:299–389` | `/proc/<pid>/exe`, `SDL_GetPrefPath` | Switch branch: user = `sdmc:/switch/sm64coopnx`, resource = `romfs:` (or SD) |
 | `std::filesystem` | `src/pc/rom_checker.cpp` | libstdc++ in devkitA64 supports it on newlib; **verify** `directory_iterator` on `sdmc:` | test in Phase 1 |
 | `fork`/`execlp` | `src/pc/utils/misc.c:613` (`open_url`) | no processes | `#ifdef` out; use `webWifi`/no-op |
 | Threads | `src/pc/thread.c` (pthreads) | libnx provides pthreads via newlib | should work; verify stack size |
@@ -267,7 +267,7 @@ window needed). Clipboard, cursor and window title are no-ops. `start_text_input
    curl (curl/MIT-style), mbedtls (Apache-2.0). libjuice (MPL-2.0, file-level copyleft) is already used upstream on PC;
    we only build unmodified sources.
 2. **Resources go in the NRO's romfs**: `lang/`, `palettes/`, built-in `mods/`, `dynos/`, `licenses/`. User mods
-   and host-downloaded mods go on the SD at `sdmc:/switch/sm64coopdx/mods/`.
+   and host-downloaded mods go on the SD at `sdmc:/switch/sm64coopnx/mods/`.
 3. **No SDL video.** Own the `NWindow` directly from deko3d, and use SDL only for game controllers and audio.
 4. **Prebuilt libs: follow upstream.** Upstream has no submodules (no `.gitmodules`). It commits prebuilt `.a` files
    straight into `lib/` (e.g. `acf3f7775 Added missing lua libs`). The port does the same: `lib/lua/switch/liblua53.a`
@@ -276,11 +276,11 @@ window needed). Clipboard, cursor and window title are no-ops. `start_text_input
 
 ## 7a. NSP requirement (new)
 
-Besides the `.nro`, the build must produce an installable **`.nsp`** (`build/us_nx/sm64coopdx.nsp`).
+Besides the `.nro`, the build must produce an installable **`.nsp`** (`build/us_nx/sm64coopnx.nsp`).
 
 - **Why it helps:** an installed title always runs as a full application. That removes the applet-mode memory
   problem; the `.nro` still needs title takeover.
-- **Pipeline:** `elf2nso` → `main`, `npdmtool` (from a checked-in `res/switch/sm64coopdx.json`) → `main.npdm`, plus romfs
+- **Pipeline:** `elf2nso` → `main`, `npdmtool` (from a checked-in `res/switch/sm64coopnx.json`) → `main.npdm`, plus romfs
   and control (NACP + icon) → **hacBrewPack** → `.nsp`. This needs a fixed homebrew **title ID** (pick an unused
   `01xxxxxxxxxxx000` value and record it here).
 - **Keys:** hacBrewPack needs the user's own `prod.keys` dumped from their console. **Never commit keys or put them in
@@ -327,7 +327,7 @@ These are guesses until measured on hardware.
    applet-type check with a clear "launch via title takeover" message, and the user/resource paths.
 4. `platform.c` / `misc.c` / `mumble.c`: minimal `#ifdef TARGET_SWITCH` guards.
 5. Boot in `--headless`-equivalent mode with `gfx_dummy` (forced on Switch for now), extract assets, run the loop,
-   log to `sdmc:/switch/sm64coopdx/log.txt`.
+   log to `sdmc:/switch/sm64coopnx/log.txt`.
 6. Confirm the Linux PC build still compiles.
 
 ## 9. Disabled / not-yet-done features on Switch
@@ -351,7 +351,7 @@ No code borrowed from the reference projects yet. Each entry should name the pro
 
 | Item | Source | License |
 |---|---|---|
-| `res/switch/sm64coopdx.json` | derived from devkitPro `switch-examples` `templates/sysmodule/sysmodule.json` | public domain (switch-examples) |
+| `res/switch/sm64coopnx.json` | derived from devkitPro `switch-examples` `templates/sysmodule/sysmodule.json` | public domain (switch-examples) |
 | `lib/lua/switch/liblua53.a` | Lua 5.3.5, lua.org (sha256-verified in `tools/switch/build_lua.sh`) | MIT |
 | `res/switch/icon.jpg` | converted from the project's `res/icon.ico` | project asset |
 
