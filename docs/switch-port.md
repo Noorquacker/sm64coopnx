@@ -125,7 +125,10 @@ until a renderer exists; gate or remove it later.
 | No errors from the validating `libdeko3dd` | ✅ |
 | 60 fps presented in yuzu | ✅ |
 | Host a game (single-player) on Switch | ✅ in yuzu (needed IPv4 sockets, below) |
-| Hardware: playable, shader compile times, validation | pending |
+| Hardware, handheld: playable, steady 60 fps, no validation errors, cached shaders load at boot | ✅ |
+| Hardware: new combiners compile in **90–135 ms** each (~3× yuzu); several in a row cause a visible hitch | known, Phase 7 (prebuilt cache in romfs / compile ahead) |
+| Hardware: quitting from the menu crashed the console | fixed: the stats thread outlived the NRO when returning to hbmenu (found via the Atmosphère crash report) |
+| Hardware, docked | not yet tested |
 
 ### Shared GLSL generator (upstream candidate)
 
