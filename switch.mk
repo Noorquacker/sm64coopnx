@@ -63,10 +63,32 @@ EXTRA_CFLAGS += $(SWITCH_ARCH) -ffunction-sections -D__SWITCH__ -DTARGET_SWITCH 
 # In C++, gcc's <limits.h> leaves LLONG_MAX to <climits>, which luaconf.h needs
 EXTRA_CPP_FLAGS += -include climits
 
+# DEKO3D_DEBUG=1 links the validating deko3d library, which reports API misuse
+DEKO3D_DEBUG ?= 0
+ifeq ($(DEKO3D_DEBUG),1)
+  DEKO3D_LIB := -ldeko3dd
+else
+  DEKO3D_LIB := -ldeko3d
+endif
+
 override LDFLAGS := -specs=$(LIBNX)/switch.specs $(SWITCH_ARCH) -Wl,-Map,$(BUILD_DIR)/sm64coopdx.map \
                     -Llib/lua/switch -l:liblua53.a \
                     -L$(PORTLIBS)/lib -lcurl -lz $(shell $(SDLCONFIG) --static-libs) \
-                    -L$(LIBNX)/lib -lnx -lm
+                    -L$(LIBNX)/lib $(DEKO3D_LIB) -lnx -lm
+
+# Precompiled deko3d shaders; the color combiner shaders are compiled at runtime (Phase 3)
+SWITCH_SHADER_SRC := $(wildcard res/switch/shaders/*.glsl)
+SWITCH_SHADER_BIN := $(patsubst res/switch/shaders/%.glsl,$(BUILD_DIR)/shaders/%.dksh,$(SWITCH_SHADER_SRC))
+
+$(BUILD_DIR)/shaders/%_vsh.dksh: res/switch/shaders/%_vsh.glsl
+	@mkdir -p $(dir $@)
+	$(call print,Compiling shader:,$<,$@)
+	$(V)$(DKP_TOOLS)/uam -s vert -o $@ $<
+
+$(BUILD_DIR)/shaders/%_fsh.dksh: res/switch/shaders/%_fsh.glsl
+	@mkdir -p $(dir $@)
+	$(call print,Compiling shader:,$<,$@)
+	$(V)$(DKP_TOOLS)/uam -s frag -o $@ $<
 
 # --------------------------------------
 # Packaging
@@ -79,11 +101,11 @@ $(SWITCH_NACP):
 	$(V)$(DKP_TOOLS)/nacptool --create "$(SWITCH_TITLE)" "$(SWITCH_AUTHOR)" "$(SWITCH_VERSION)" $@ --titleid=$(SWITCH_TITLE_ID)
 
 # Built-in resources ship read-only inside the NRO/NSP romfs
-switch-romfs: $(EXE)
+switch-romfs: $(EXE) $(SWITCH_SHADER_BIN)
 	@$(PRINT) "$(GREEN)Staging romfs: $(BLUE)$(SWITCH_ROMFS) $(NO_COL)\n"
 	$(V)rm -rf $(SWITCH_ROMFS)
 	$(V)mkdir -p $(SWITCH_ROMFS)
-	$(V)cp -r $(BUILD_DIR)/lang $(BUILD_DIR)/mods $(BUILD_DIR)/palettes $(BUILD_DIR)/dynos $(SWITCH_ROMFS)/
+	$(V)cp -r $(BUILD_DIR)/lang $(BUILD_DIR)/mods $(BUILD_DIR)/palettes $(BUILD_DIR)/dynos $(BUILD_DIR)/shaders $(SWITCH_ROMFS)/
 	$(V)cp -r res/switch/licenses $(SWITCH_ROMFS)/
 
 $(SWITCH_NRO): $(EXE) $(SWITCH_NACP) $(SWITCH_ICON) switch-romfs

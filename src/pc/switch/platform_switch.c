@@ -15,9 +15,11 @@
 
 #include "pc/platform.h"
 #include "platform_switch.h"
+#include "gfx_switch.h"
 
 #define SWITCH_LOG_FILE SWITCH_USER_DIR "/log.txt"
 #define SWITCH_STATS_INTERVAL_SECONDS 10
+#define SWITCH_CAPTURE_TRIGGER SWITCH_USER_DIR "/capture"
 
 extern int __system_argc;
 extern char **__system_argv;
@@ -74,17 +76,31 @@ static void switch_init_logging(void) {
     setvbuf(stderr, NULL, _IONBF, 0);
 }
 
-// periodically logs game frames and heap use; shows the game loop is alive even with no renderer
+// periodically logs game ticks, presented frames per second and heap use
 static void *switch_stats_thread(void *arg) {
     (void) arg;
     u32 lastTimer = gGlobalTimer;
+    u32 lastPresents = gfx_deko3d_get_present_count();
     while (true) {
         sleep(SWITCH_STATS_INTERVAL_SECONDS);
         struct mallinfo mi = mallinfo();
         u32 timer = gGlobalTimer;
-        printf("[switch] game frames: %u (+%u), heap used: %lu MiB\n",
-               timer, timer - lastTimer, (unsigned long)(mi.uordblks / (1024 * 1024)));
+        u32 presents = gfx_deko3d_get_present_count();
+        printf("[switch] game ticks: %u (+%u), presented: %u (%.1f fps), heap used: %lu MiB\n",
+               timer, timer - lastTimer, presents,
+               (double) (presents - lastPresents) / SWITCH_STATS_INTERVAL_SECONDS,
+               (unsigned long)(mi.uordblks / (1024 * 1024)));
         lastTimer = timer;
+        lastPresents = presents;
+
+        // debug: creating an empty "capture" file in the user dir saves the next frame
+        // (checked with stat first: yuzu's remove() reports success for missing files)
+        struct stat st;
+        if (stat(SWITCH_CAPTURE_TRIGGER, &st) == 0 && remove(SWITCH_CAPTURE_TRIGGER) == 0) {
+            char path[64];
+            snprintf(path, sizeof(path), SWITCH_USER_DIR "/capture_%u.ppm", presents);
+            gfx_deko3d_request_capture(path);
+        }
     }
     return NULL;
 }

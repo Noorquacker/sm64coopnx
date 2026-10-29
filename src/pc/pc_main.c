@@ -58,6 +58,10 @@
 
 #include "engine/math_util.h"
 
+#ifdef TARGET_SWITCH
+#include "switch/gfx_switch.h"
+#endif
+
 #ifdef DISCORD_SDK
 #include "pc/discord/discord.h"
 #endif
@@ -227,8 +231,9 @@ static void select_graphics_backend(void) {
     }
 #endif
 #if defined(TARGET_SWITCH)
-    // TODO: deko3d backend (docs/switch-port.md, Phases 2-3). Until then the game runs on the dummy window/renderer
-    gAudioApi = &audio_sdl;
+    gWindowApi = &gfx_switch_wm;
+    gRenderApi = &gfx_deko3d_api;
+    gAudioApi  = &audio_sdl;
 #else
     int backend = configGraphicsBackend;
 #if defined(_WIN32)
