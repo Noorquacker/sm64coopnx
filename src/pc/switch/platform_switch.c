@@ -26,6 +26,12 @@ extern u32 gGlobalTimer; // game/display.h
 
 static int sNxlinkSocket = -1;
 
+// Horizon only brings up (and keeps) the internet connection for an application that
+// asks for it through nifm; without a request, sockets fail with ENETUNREACH on hardware.
+static NifmRequest sNetRequest;
+static bool sNetRequestCreated = false;
+static NifmRequestState sNetRequestState = NifmRequestState_Invalid;
+
 // SWITCH_USER_DIR, or SWITCH_LEGACY_USER_DIR if it couldn't be moved
 static const char *sUserDir = SWITCH_USER_DIR;
 
@@ -119,6 +125,33 @@ static bool switch_stats_sleep(void) {
     return !sStatsThreadStop;
 }
 
+// submits the request without waiting: connecting can take seconds (or fail when offline)
+static void switch_request_internet(void) {
+    Result rc = nifmInitialize(NifmServiceType_User);
+    if (R_SUCCEEDED(rc)) {
+        rc = nifmCreateRequest(&sNetRequest, true);
+        if (R_SUCCEEDED(rc)) {
+            sNetRequestCreated = true;
+            rc = nifmRequestSubmit(&sNetRequest);
+        }
+    }
+    if (R_FAILED(rc)) { printf("[switch] internet connection request failed: 0x%x\n", rc); }
+}
+
+// logs when the connection becomes available or is lost
+static void switch_log_internet_state(void) {
+    if (!sNetRequestCreated) { return; }
+    NifmRequestState state;
+    if (R_FAILED(nifmGetRequestState(&sNetRequest, &state)) || state == sNetRequestState) { return; }
+    sNetRequestState = state;
+    if (state == NifmRequestState_Available) {
+        printf("[switch] internet connection available\n");
+    } else if (state != NifmRequestState_Unknown1) {
+        printf("[switch] internet connection not available (state %d, result 0x%x)\n",
+               (int)state, nifmGetResult(&sNetRequest));
+    }
+}
+
 // periodically logs game ticks, presented frames per second and heap use,
 // and checks every second for a framebuffer capture request
 static void *switch_stats_thread(void *arg) {
@@ -135,6 +168,8 @@ static void *switch_stats_thread(void *arg) {
             fflush(stdout);
             fsync(fileno(stdout));
         }
+
+        switch_log_internet_state();
 
         // debug: creating an empty "capture" file in the user dir saves the next frame
         // (checked with stat first: yuzu's remove() reports success for missing files)
@@ -209,6 +244,7 @@ void userAppInit(void) {
     switch_check_applet_mode();
 
     socketInitializeDefault();
+    switch_request_internet();
     romfsInit();
 
     enum UserDirMigration migration = switch_init_user_dir();
@@ -244,6 +280,11 @@ void userAppExit(void) {
         sNxlinkSocket = -1;
     }
     romfsExit();
+    if (sNetRequestCreated) {
+        nifmRequestClose(&sNetRequest);
+        sNetRequestCreated = false;
+    }
+    nifmExit();
     socketExit();
 }
 
