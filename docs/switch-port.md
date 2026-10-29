@@ -210,6 +210,9 @@ Packets are identical, and a PC's dual-stack socket talks to IPv4 peers natively
   and Enter confirms it (sends the chat message, …); cancelling presses Esc. It all goes through DJUI's normal
   keyboard callbacks: Ctrl+A/Ctrl+C fetch the text through the window manager's clipboard functions. So there
   are no shared DJUI changes, and nothing runs inside DJUI's own focus callback.
+- **Chat:** coopdx binds chat only to Enter on a keyboard. On Switch it also defaults to the right stick click
+  (R3), the only controller button without a default. Existing configs keep their saved binding (rebind in the
+  controls menu).
 - **Mod audio:** Lua mods play sounds through miniaudio, which has no playback device on Switch (only its null
   backend), so they were silent. On Switch the miniaudio engine runs without a device at the game's output format
   (stereo 32 kHz), and `audio_switch` mixes it into the game's SDL audio. Verified in yuzu, and on hardware with a

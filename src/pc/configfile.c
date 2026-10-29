@@ -142,7 +142,12 @@ unsigned int configKeyStickUp[MAX_BINDS]          = { 0x0011,     VK_INVALID, VK
 unsigned int configKeyStickDown[MAX_BINDS]        = { 0x001F,     VK_INVALID, VK_INVALID };
 unsigned int configKeyStickLeft[MAX_BINDS]        = { 0x001E,     VK_INVALID, VK_INVALID };
 unsigned int configKeyStickRight[MAX_BINDS]       = { 0x0020,     VK_INVALID, VK_INVALID };
+#ifdef TARGET_SWITCH
+// no keyboard on Switch: right stick click opens chat
+unsigned int configKeyChat[MAX_BINDS]             = { 0x001C,     0x1008,     VK_INVALID };
+#else
 unsigned int configKeyChat[MAX_BINDS]             = { 0x001C,     VK_INVALID, VK_INVALID };
+#endif
 unsigned int configKeyPlayerList[MAX_BINDS]       = { 0x000F,     0x1004,     VK_INVALID };
 unsigned int configKeyDUp[MAX_BINDS]              = { 0x0147,     0x100b,     VK_INVALID };
 unsigned int configKeyDDown[MAX_BINDS]            = { 0x014f,     0x100c,     VK_INVALID };
