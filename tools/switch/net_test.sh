@@ -36,7 +36,7 @@ cleanup() {
     for pid in "${PIDS[@]}"; do kill -9 "$pid" 2>/dev/null || true; done
     [ -n "${SD_DIR:-}" ] && rm -f "$SD_DIR/args.txt" "$SD_DIR/capture" "$SD_DIR/quit"
     [ -n "${SD_DIR:-}" ] && [ -f "$WORK_DIR/sm64config.txt.bak" ] && cp "$WORK_DIR/sm64config.txt.bak" "$SD_DIR/sm64config.txt"
-    [ -n "${SD_DIR:-}" ] && [ -n "$MOD_DIR" ] && rm -rf "$SD_DIR/mods/$(basename "$MOD_DIR")"
+    [ -n "${SWITCH_MOD:-}" ] && rm -rf "$SWITCH_MOD"
     rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT
@@ -96,7 +96,7 @@ start_pc() {
     rm -rf "$PC_DIR"
     mkdir -p "$PC_DIR/mods"
     cp "$ROM" "$PC_DIR/"
-    [ "${2:-}" = with-mod ] && cp -r "$MOD_DIR" "$PC_DIR/mods/"
+    [ "${2:-}" = with-mod ] && cp -r "$PC_MOD" "$PC_DIR/mods/"
     printf "language English\ndebug_info true\n" > "$PC_DIR/sm64config.txt"
     (cd "$(dirname "$PC_EXE")" && env -u WAYLAND_DISPLAY SDL_VIDEODRIVER=x11 DISPLAY=$PC_DISPLAY \
         stdbuf -oL "$PC_EXE" --savepath "$PC_DIR" --windowed --width 1280 --height 720 $1 > "$PC_DIR/stdout.txt" 2>&1) & PIDS+=($!)
@@ -109,6 +109,20 @@ stop_both() {
     sleep 1
 }
 
+# Copies MOD_DIR to a uniquely named mod whose files all differ from any earlier copy,
+# so the joining side has to download every file instead of finding it in its mod cache.
+# (Bytes appended after an .ogg's last page are ignored by decoders.)
+unique_mod() {
+    local token dest
+    token=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    dest="$WORK_DIR/mod-$token/$(basename "$MOD_DIR")-$token"
+    mkdir -p "$(dirname "$dest")"
+    cp -r "$MOD_DIR" "$dest"
+    find "$dest" -name '*.lua' -exec sh -c 'printf "\n-- %s\n" "$1" >> "$2"' _ "$token" {} \;
+    find "$dest" -name '*.ogg' -exec sh -c 'printf "%s" "$1" >> "$2"' _ "$token" {} \;
+    echo "$dest"
+}
+
 report() {
     local name=$1 ok=$2
     if [ "$ok" = 1 ]; then echo "PASS $name"; else echo "FAIL $name"; fi
@@ -119,8 +133,10 @@ if [ "$SCENARIOS" = switch-host ] || [ "$SCENARIOS" = both ]; then
     echo "switch-host: Switch hosts on 7777, upstream PC joins"
     HOST_MODS="--disable-mods"
     if [ -n "$MOD_DIR" ]; then
-        cp -r "$MOD_DIR" "$SD_DIR/mods/"
-        HOST_MODS="--disable-mods --enable-mod $(basename "$MOD_DIR")"
+        mod=$(unique_mod)
+        cp -r "$mod" "$SD_DIR/mods/"
+        SWITCH_MOD="$SD_DIR/mods/$(basename "$mod")"
+        HOST_MODS="--disable-mods --enable-mod $(basename "$mod")"
     fi
     start_switch "--server 7777 $COMMON --playername switch $HOST_MODS"
     ok=0
@@ -135,13 +151,15 @@ if [ "$SCENARIOS" = switch-host ] || [ "$SCENARIOS" = both ]; then
     cp "$SD_DIR/log.txt" "$OUT_DIR/switch-host_switch_log.txt" 2>/dev/null || true
     cp "$PC_DIR/stdout.txt" "$OUT_DIR/switch-host_pc_log.txt" 2>/dev/null || true
     stop_both
+    [ -n "${SWITCH_MOD:-}" ] && rm -rf "$SWITCH_MOD"
     report switch-host $ok
 fi
 
 if [ "$SCENARIOS" = pc-host ] || [ "$SCENARIOS" = both ]; then
     echo "pc-host: upstream PC hosts on 7778, Switch joins"
     if [ -n "$MOD_DIR" ]; then
-        start_pc "--server 7778 $COMMON --playername pc --disable-mods --enable-mod $(basename "$MOD_DIR")" with-mod
+        PC_MOD=$(unique_mod)
+        start_pc "--server 7778 $COMMON --playername pc --disable-mods --enable-mod $(basename "$PC_MOD")" with-mod
     else
         start_pc "--server 7778 $COMMON --playername pc --disable-mods"
     fi
