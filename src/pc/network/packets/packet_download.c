@@ -226,6 +226,26 @@ void network_send_download_request(u64 offset) {
     LOG_INFO("Requesting group: %llu [ %llu <---> %llu ]", (offset / GROUP_SIZE), offset, offset + GROUP_SIZE);
 }
 
+// The file being read for the current group. Opening it for every 800-byte chunk means 50
+// opens per group, each a slow SD card access on Switch, which stalls the host's frames.
+static struct ModFile* sReadFile = NULL;
+static FILE* sReadFp = NULL;
+
+static FILE* download_read_file(struct ModFile* modFile) {
+    if (sReadFile == modFile && sReadFp != NULL) { return sReadFp; }
+    if (sReadFp != NULL) { fclose(sReadFp); }
+    sReadFile = modFile;
+    sReadFp = fopen(modFile->cachedPath, "rb");
+    if (sReadFp != NULL) { setvbuf(sReadFp, NULL, _IOFBF, GROUP_SIZE); }
+    return sReadFp;
+}
+
+static void download_read_close(void) {
+    if (sReadFp != NULL) { fclose(sReadFp); }
+    sReadFp = NULL;
+    sReadFile = NULL;
+}
+
 void network_receive_download_request(struct Packet* p) {
     SOFT_ASSERT(gNetworkType == NT_SERVER);
 
@@ -240,6 +260,7 @@ void network_receive_download_request(struct Packet* p) {
         }
         network_send_download(sendOffset);
     }
+    download_read_close();
 
     LOG_INFO("Sending group: %llu [ %llu <---> %llu ]", (requestOffset / GROUP_SIZE), requestOffset, requestOffset + GROUP_SIZE);
 }
@@ -272,26 +293,16 @@ void network_send_download(u64 requestOffset) {
             u64 fileReadOffset = MAX(((s64)requestOffset - (s64)fileStartOffset), 0);
             u64 fileReadLength = MIN((modFile->size - fileReadOffset), (CHUNK_SIZE - chunkFill));
 
-            // open file pointer
-            bool opened = false;
-            if (modFile->fp == NULL) {
-                modFile->fp = fopen(modFile->cachedPath, "rb");
-                if (modFile->fp == NULL) {
-                    LOG_ERROR("Failed to open mod file during download: %s", modFile->cachedPath);
-                    return;
-                }
-                opened = true;
+            // open file pointer (kept open until the group is sent)
+            FILE* fp = (modFile->fp != NULL) ? modFile->fp : download_read_file(modFile);
+            if (fp == NULL) {
+                LOG_ERROR("Failed to open mod file during download: %s", modFile->cachedPath);
+                return;
             }
 
             // read from file, filling chunk
-            fseek(modFile->fp, fileReadOffset, SEEK_SET);
-            fread(&chunk[chunkFill], sizeof(u8), fileReadLength, modFile->fp);
-
-            // close file pointer
-            if (opened) {
-                fclose(modFile->fp);
-                modFile->fp = NULL;
-            }
+            fseek(fp, fileReadOffset, SEEK_SET);
+            fread(&chunk[chunkFill], sizeof(u8), fileReadLength, fp);
 
             // increment counters
             chunkFill += fileReadLength;
