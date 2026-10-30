@@ -198,7 +198,7 @@ static void network_update_offset_groups(void) {
             }
             mod->enabled = true;
         }
-        LOG_INFO("Download complete!");
+        LOG_INFO("Download complete! %llu bytes in %.1f s", (u64)sDownloadReceivedBytes, clock_elapsed() - sDownloadStartTime);
         network_send_join_request();
         return;
     }
@@ -343,6 +343,8 @@ static void open_mod_file(struct Mod* mod, struct ModFile* file) {
     if (should_cache_mod(mod)) {
         mod_file_create_directories(mod, file);
         file->fp = fopen(fullPath, "wb");
+        // chunks are small; let stdio batch them into larger writes
+        if (file->fp != NULL) { setvbuf(file->fp, NULL, _IOFBF, 64 * 1024); }
     } else {
         file->fp = f_open_w(fullPath);
     }
@@ -446,7 +448,10 @@ after_group:;
                     LOG_ERROR("Failed to open file for download write: %s", modFile->cachedPath);
                     return;
                 }
-                f_seek(modFile->fp, fileWriteOffset, SEEK_SET);
+                // chunks mostly arrive in order; seeking flushes the write buffer
+                if ((u64)f_tell(modFile->fp) != fileWriteOffset) {
+                    f_seek(modFile->fp, fileWriteOffset, SEEK_SET);
+                }
                 f_write(&chunk[chunkPour], sizeof(u8), fileWriteLength, modFile->fp);
                 modFile->wroteBytes += fileWriteLength;
 
