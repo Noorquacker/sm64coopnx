@@ -1,10 +1,12 @@
 -- name: Player Bots
--- description: Load test: every player except the host circles around the host's Mario and jumps, so joined test clients cost what real players cost. Used for the Switch many-player test.
+-- description: Load test: every player except the host follows the host into its level and area, circles around the host's Mario and jumps, so joined test clients cost what real players cost. Used for the Switch many-player test.
 
 local RADIUS = 400
 local TELEPORT_DIST = 2500
+local WARP_RETRY_FRAMES = 30 * 5
 
 local frame = 0
+local lastWarp = -WARP_RETRY_FRAMES
 
 hook_event(HOOK_BEFORE_MARIO_UPDATE, function(m)
     if m.playerIndex ~= 0 or network_is_server() then return end
@@ -15,7 +17,16 @@ hook_event(HOOK_BEFORE_MARIO_UPDATE, function(m)
     local host = gMarioStates[hostIndex]
     local np = gNetworkPlayers[hostIndex]
     local me = gNetworkPlayers[0]
-    if not np.connected or np.currLevelNum ~= me.currLevelNum or np.currAreaIndex ~= me.currAreaIndex then return end
+    if not np.connected then return end
+
+    -- follow the host into its level and area (retried, a warp can't start mid-transition)
+    if np.currLevelNum ~= me.currLevelNum or np.currAreaIndex ~= me.currAreaIndex then
+        if frame - lastWarp >= WARP_RETRY_FRAMES and np.currLevelNum ~= 0 then
+            lastWarp = frame
+            warp_to_level(np.currLevelNum, np.currAreaIndex, np.currActNum)
+        end
+        return
+    end
 
     -- a point on a circle around the host, spread out by player index
     local angle = (frame * 200 + me.globalIndex * 0x10000 // 8) & 0xFFFF
