@@ -101,8 +101,11 @@ static void switch_init_logging(void) {
         if (log) { fclose(log); }
         freopen(logPath, "a", stdout);
         freopen(logPath, "a", stderr);
+        // each SD write costs milliseconds, so buffer fully; the stats thread flushes once a second
+        setvbuf(stdout, NULL, _IOFBF, 64 * 1024);
+    } else {
+        setvbuf(stdout, NULL, _IOLBF, 0);
     }
-    setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 }
 
