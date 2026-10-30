@@ -18,6 +18,9 @@ bool switch_copy_file(const char *srcPath, const char *dstPath);
 // debug: true once a "quit" file was created in the user dir (the window manager then quits the game)
 bool switch_quit_requested(void);
 
+// shows warnings from the stats thread (e.g. memory almost full) as popups; call on the main thread
+void switch_show_pending_warnings(void);
+
 // shows a system error dialog, then exits
 void switch_fatal(const char *msg) __attribute__ ((noreturn));
 

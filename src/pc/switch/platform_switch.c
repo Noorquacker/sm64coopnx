@@ -115,6 +115,28 @@ bool switch_quit_requested(void) {
     return sQuitRequested;
 }
 
+// from pc/djui (its headers clash with libnx's integer types)
+struct DjuiRoot;
+extern struct DjuiRoot* gDjuiRoot;
+void djui_popup_create(const char* message, int lines);
+
+// the newlib heap set up by libnx: almost all of the process's memory, GPU memory included
+extern char *fake_heap_start;
+extern char *fake_heap_end;
+#define SWITCH_HEAP_WARN_PERCENT 90
+static bool sHeapWarned = false;
+static volatile bool sHeapWarningPending = false;
+
+static size_t switch_heap_size(void) {
+    return (size_t)(fake_heap_end - fake_heap_start);
+}
+
+void switch_show_pending_warnings(void) {
+    if (!sHeapWarningPending || gDjuiRoot == NULL) { return; }
+    sHeapWarningPending = false;
+    djui_popup_create("\\#ffa0a0\\Memory is almost full.\\#dcdcdc\\\nDisabling some mods or DynOS packs may prevent a crash.", 3);
+}
+
 static pthread_t sStatsThread;
 static bool sStatsThreadRunning = false;
 static volatile bool sStatsThreadStop = false;
@@ -194,12 +216,22 @@ static void *switch_stats_thread(void *arg) {
         struct mallinfo mi = mallinfo();
         u32 timer = gGlobalTimer;
         u32 presents = gfx_deko3d_get_present_count();
-        printf("[switch] game ticks: %u (+%u), presented: %u (%.1f fps), heap used: %lu MiB\n",
+        size_t heapSize = switch_heap_size();
+        printf("[switch] game ticks: %u (+%u), presented: %u (%.1f fps), heap used: %lu of %lu MiB\n",
                timer, timer - lastTimer, presents,
                (double) (presents - lastPresents) / SWITCH_STATS_INTERVAL_SECONDS,
-               (unsigned long)(mi.uordblks / (1024 * 1024)));
+               (unsigned long)(mi.uordblks / (1024 * 1024)), (unsigned long)(heapSize / (1024 * 1024)));
         lastTimer = timer;
         lastPresents = presents;
+
+        // warn once when the heap (which also holds GPU memory) is nearly full
+        if (!sHeapWarned && heapSize > 0 && mi.uordblks > heapSize / 100 * SWITCH_HEAP_WARN_PERCENT) {
+            sHeapWarned = true;
+            sHeapWarningPending = true;
+            printf("[switch] warning: heap use is above %d%% (%lu of %lu MiB), the game may run out of memory\n",
+                   SWITCH_HEAP_WARN_PERCENT, (unsigned long)(mi.uordblks / (1024 * 1024)),
+                   (unsigned long)(heapSize / (1024 * 1024)));
+        }
     }
     return NULL;
 }

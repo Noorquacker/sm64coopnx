@@ -154,6 +154,8 @@ static void gfx_switch_wm_handle_events(void) {
         sTextInputPending = false;
         gfx_switch_wm_edit_text();
     }
+
+    switch_show_pending_warnings();
 }
 
 static bool gfx_switch_wm_start_frame(void) {
