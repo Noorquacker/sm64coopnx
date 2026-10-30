@@ -10,9 +10,18 @@
 #include "pc/configfile.h"
 #include "pc/debuglog.h"
 #include "pc/djui/djui.h"
+#include "platform_switch.h"
+
+// How often a broken socket may be recreated (see ns_socket_update), in updates (frames)
+#define SOCKET_RECOVERY_INTERVAL 30
 
 static SOCKET sCurSocket = INVALID_SOCKET;
 static struct sockaddr_in sAddr[MAX_PLAYERS] = { 0 };
+static unsigned int sHostPort = 0;
+static int sLastReceiveError = 0;
+static u32 sUpdateCount = 0;
+static u32 sLastRecoveryUpdate = 0;
+static bool sRecovered = false;
 
 char gGetHostName[MAX_CONFIG_STRING] = "";
 
@@ -119,10 +128,7 @@ static int socket_receive(SOCKET socket, struct sockaddr_in* rxAddr, u8* buffer,
     }
 
     if (rc == SOCKET_ERROR) {
-        int error = SOCKET_LAST_ERROR;
-        if (error != SOCKET_EWOULDBLOCK && error != SOCKET_ECONNRESET) {
-            LOG_ERROR("recvfrom failed with error %d", SOCKET_LAST_ERROR);
-        }
+        sLastReceiveError = SOCKET_LAST_ERROR;
         return SOCKET_ERROR;
     }
 
@@ -152,6 +158,7 @@ static bool ns_socket_initialize(enum NetworkType networkType, UNUSED bool recon
             return false;
         }
         LOG_INFO("bound to port %u", port);
+        sHostPort = port;
     } else if (networkType == NT_CLIENT) {
         struct sockaddr_in addr;
         memset(&addr, 0, sizeof(struct sockaddr_in));
@@ -212,8 +219,34 @@ static bool ns_socket_match_addr(void* addr1, void* addr2) {
     return !memcmp(addr1, addr2, sizeof(struct sockaddr_in));
 }
 
+// Horizon can leave a socket permanently failing with ENETDOWN (seen on hardware while hosting,
+// with the internet connection still up), so a socket that fails with anything but "no data"
+// is replaced by a new one on the same port. Clients are identified by their own address, so
+// they keep working. A joining client's socket gets a new port, which the host may not accept.
+static void ns_socket_recover(int error) {
+    if (sRecovered && sUpdateCount - sLastRecoveryUpdate < SOCKET_RECOVERY_INTERVAL) { return; }
+    sRecovered = true;
+    sLastRecoveryUpdate = sUpdateCount;
+    LOG_ERROR("recvfrom failed with error %d (internet request state %d), recreating the socket",
+              error, switch_internet_request_state());
+
+    socket_shutdown(sCurSocket);
+    sCurSocket = socket_initialize();
+    if (sCurSocket == INVALID_SOCKET || sHostPort == 0) { return; }
+    int reuse = 1;
+    setsockopt(sCurSocket, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+    if (socket_bind(sCurSocket, sHostPort) == NO_ERROR) {
+        LOG_INFO("bound to port %u", sHostPort);
+    }
+}
+
 static void ns_socket_update(void) {
     if (gNetworkType == NT_NONE) { return; }
+    sUpdateCount++;
+    if (sCurSocket == INVALID_SOCKET) {
+        ns_socket_recover(0);
+        return;
+    }
     do {
         // receive packet
         u8 data[PACKET_LENGTH + 1];
@@ -221,7 +254,12 @@ static void ns_socket_update(void) {
         u8 localIndex = UNKNOWN_LOCAL_INDEX;
         int rc = socket_receive(sCurSocket, &sAddr[0], data, PACKET_LENGTH + 1, &dataLength, &localIndex);
         SOFT_ASSERT(dataLength < PACKET_LENGTH);
-        if (rc != NO_ERROR) { break; }
+        if (rc != NO_ERROR) {
+            if (sLastReceiveError != SOCKET_EWOULDBLOCK && sLastReceiveError != SOCKET_ECONNRESET) {
+                ns_socket_recover(sLastReceiveError);
+            }
+            break;
+        }
         network_receive(localIndex, &sAddr[0], data, dataLength);
     } while (true);
 }
@@ -253,6 +291,8 @@ static void ns_socket_get_lobby_secret(char* destination, u32 destLength) {
 static void ns_socket_shutdown(UNUSED bool reconnecting) {
     socket_shutdown(sCurSocket);
     sCurSocket = INVALID_SOCKET;
+    sHostPort = 0;
+    sRecovered = false;
     for (u16 i = 0; i < MAX_PLAYERS; i++) {
         memset(&sAddr[i], 0, sizeof(struct sockaddr_in));
     }

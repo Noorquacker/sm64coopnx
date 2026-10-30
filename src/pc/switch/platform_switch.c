@@ -166,6 +166,12 @@ static void switch_request_internet(void) {
     if (R_FAILED(rc)) { printf("[switch] internet connection request failed: 0x%x\n", rc); }
 }
 
+int switch_internet_request_state(void) {
+    NifmRequestState state;
+    if (!sNetRequestCreated || R_FAILED(nifmGetRequestState(&sNetRequest, &state))) { return -1; }
+    return (int)state;
+}
+
 // logs when the connection becomes available or is lost
 static void switch_log_internet_state(void) {
     if (!sNetRequestCreated) { return; }
