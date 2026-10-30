@@ -218,7 +218,10 @@ void normalize_path(char* path) {
 }
 
 bool concat_path(char* destination, char* path, char* fname) {
-    return (snprintf(destination, SYS_MAX_PATH - 1, "%s/%s", path, fname) >= 0);
+    // no doubled separator: Switch's romfs doesn't find paths like 'romfs:/mods/arena//main.lua'
+    size_t len = strlen(path);
+    bool hasSeparator = len > 0 && (path[len - 1] == *PATH_SEPARATOR || path[len - 1] == *PATH_SEPARATOR_ALT);
+    return (snprintf(destination, SYS_MAX_PATH - 1, hasSeparator ? "%s%s" : "%s/%s", path, fname) >= 0);
 }
 
 char* path_basename(char* path) {
