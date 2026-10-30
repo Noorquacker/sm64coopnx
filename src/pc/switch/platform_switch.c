@@ -242,11 +242,26 @@ static void switch_load_args_file(void) {
     printf("\n");
 }
 
+// The default UDP buffers (9 KiB send, 41 KiB receive) can't hold a mod download group: the
+// host sends 50 packets of ~830 bytes at once, and libjuice silently drops sends that would block.
+// The send buffer stays close to one group, since a deeper queue delays the acks behind it.
+#define SWITCH_UDP_TX_BUF_SIZE 0x10000
+#define SWITCH_UDP_RX_BUF_SIZE 0x20000
+
+static Result switch_init_sockets(void) {
+    SocketInitConfig config = *socketGetDefaultInitConfig();
+    config.udp_tx_buf_size = SWITCH_UDP_TX_BUF_SIZE;
+    config.udp_rx_buf_size = SWITCH_UDP_RX_BUF_SIZE;
+    Result rc = socketInitialize(&config);
+    if (R_FAILED(rc)) { socketInitializeDefault(); }
+    return rc;
+}
+
 // called by libnx before main()
 void userAppInit(void) {
     switch_check_applet_mode();
 
-    socketInitializeDefault();
+    Result socketRc = switch_init_sockets();
     switch_request_internet();
     romfsInit();
 
@@ -264,6 +279,9 @@ void userAppInit(void) {
         printf("Moved user data from " SWITCH_LEGACY_USER_DIR " to " SWITCH_USER_DIR "\n");
     } else if (migration == MIGRATION_FAILED) {
         printf("Could not move " SWITCH_LEGACY_USER_DIR " to " SWITCH_USER_DIR ", still using the old folder\n");
+    }
+    if (R_FAILED(socketRc)) {
+        printf("[switch] larger UDP buffers were refused (0x%x), using the defaults\n", socketRc);
     }
     switch_load_args_file();
 
