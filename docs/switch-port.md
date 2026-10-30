@@ -350,15 +350,44 @@ circle the host's Mario and jump, so each one is simulated, synced and drawn lik
 | 4 | Castle Grounds | ~110 s | 60.1 | 30/s | 127–129 MiB |
 | 8 | Castle Grounds | 15 s | 60.0–60.3 | 30/s | 129 MiB |
 | 8 | Bob-omb Battlefield, all 7 bots followed within 3 s | ~3 min | 57.3–60.3, average 59.6 | 30/s | 129–131 MiB |
+| 8, character-select-coop + Triple Baka pack (every bot a different character) | Whomp's Fortress, all 7 followed within 3 s | ~3.5 min | 30.5–59.1, average 48.6 | 29–30/s | 191–204 MiB |
 
 - Game logic never fell behind (300 ticks every 10 s). The occasional 10 s window at 57–59 fps is a few
   dropped presented frames in a busy course.
 - The estimate in section 7b was too pessimistic: 8 players run at 60 fps, not "30 fps, 60 unlikely". The shared-code
-  mitigations listed there aren't needed for 8 players. Lua-heavy gamemodes and DynOS packs with many players
-  remain untested.
+  mitigations listed there aren't needed for 8 vanilla players. With a DynOS character pack on every player the
+  presented rate drops to about 49 fps on average, but game logic keeps its 30 ticks/s. Lua-heavy gamemodes with
+  many players remain untested.
 - `packet_object.c: received uninitialized sync object` appeared 53 times in two bursts in BoB. It's upstream code
   (unchanged in the fork) dropping updates for objects the host hasn't set up or has already deleted, such as
   Bob-ombs.
+
+### Serving mod downloads to several clients (fixed)
+
+With the character mods enabled (about 13.4 MB), 7 clients joining at once used to freeze the host:
+
+- **Before:** no game ticks and no frames for about 78 s on hardware (100 s in yuzu). `ns_socket_update` kept
+  handling packets as long as any were waiting, and each download request sends a 40 KB group as 50 reliable
+  packets, so requests and acks never ran out. One client never finished: reliable resends only run after
+  that loop, so a lost chunk waited over a minute. The most likely explanation is that the host's 16-bit
+  sequence counter wrapped meanwhile and another client's ack cleared the chunk (`network_receive_ack` matches
+  by sequence id only, not by sender; upstream). The client never requests a group twice, so it waits forever.
+  An unmodified PC host served the same 7 downloads without problems.
+- **After:** packet handling stops after 10 ms per update (`SOCKET_RECEIVE_BUDGET_NS`), and the rest waits in the
+  socket's receive buffer. On hardware all 7 clients joined 1.3–2 min after starting, every group was sent
+  exactly once (2345 = 7 × 335), and no reliable packet was given up. The host kept running at 23–26 fps and
+  about 25 game ticks/s during the downloads.
+- **Upstream candidate:** acks should be matched by sender and sequence id.
+
+### Socket stops receiving (ENETDOWN) — worked around
+
+Hosting at launch with the character mods, every `recvfrom` failed with errno 115 (`ENETDOWN`) from 19 s in,
+30 times a second, while the internet connection request stayed available. No client could join. It's the
+"seen once, not reproduced" bug from Phase 6. The trigger is unknown; a brief network reset under the
+socket is the most likely one. A socket that fails with anything but "no data" is now replaced by a new
+one bound to the same port, at most once a second, and the error is logged once with the nifm request state.
+Tested in yuzu by closing the socket while hosting: a connected client stayed, and a new one joined. On
+hardware the bug hasn't happened since, so the recovery hasn't run there yet.
 
 ### Hosting with large mods freezes for a few seconds
 
