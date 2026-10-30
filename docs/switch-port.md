@@ -217,6 +217,12 @@ Packets are identical, and a PC's dual-stack socket talks to IPv4 peers natively
   backend), so they were silent. On Switch the miniaudio engine runs without a device at the game's output format
   (stereo 32 kHz), and `audio_switch` mixes it into the game's SDL audio. Verified in yuzu, and on hardware with a
   test mod playing a looping stream and a sample on every jump.
+- **Audio output (`src/pc/switch/audio_switch.c`):** the game's audio goes straight to libnx's audio renderer
+  driver (audrv) from the game thread, not through SDL. devkitPro SDL 2.28's Switch driver waits for the
+  renderer without a timeout; on hardware the renderer sometimes stopped consuming audio, which left the game
+  silent and made quitting hang in `SDL_CloseAudioDevice` (found from an Atmosphère crash report of all threads).
+  The new backend never waits: it queues wave buffers from `play()`, and if nothing is played for 500 ms while
+  audio is queued it logs the renderer state and restarts the renderer.
 - **Controllers (devkitPro SDL, from its source):** handheld, Joy-Con pair and Pro Controller have full analog
   input, and SDL shows the system controller setup applet by itself when controllers change. A **single Joy-Con
   held sideways only reports its stick as four digital directions**, which isn't enough to play. There's also no

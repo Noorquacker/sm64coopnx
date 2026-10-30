@@ -5,7 +5,7 @@
 
 #include "pc/audio/audio_api.h"
 
-// the game's SDL audio, with mod audio (miniaudio) mixed in
+// the game's audio, with mod audio (miniaudio) mixed in, on libnx's audio renderer
 extern struct AudioAPI audio_switch;
 
 // Mixes mod audio into interleaved stereo 32 kHz samples. Miniaudio has no playback device on
