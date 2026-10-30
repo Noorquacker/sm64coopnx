@@ -1,35 +1,5 @@
---- a/src/socket.h	2026-10-29 12:00:09.783868267 -0500
-+++ b/src/socket.h	2026-10-29 12:00:09.814553186 -0500
-@@ -81,7 +81,7 @@
- #define NO_PMTUDISC
- #endif
- 
--#ifdef __ANDROID__
-+#if defined(__ANDROID__) || defined(__SWITCH__) // Switch: no getifaddrs() in libnx
- #define NO_IFADDRS
- #else
- #include <ifaddrs.h>
---- a/src/random.c	2026-10-29 12:00:09.792144044 -0500
-+++ b/src/random.c	2026-10-29 12:00:09.814753284 -0500
-@@ -33,6 +33,16 @@
- 	return 0;
- }
- 
-+#elif defined(__SWITCH__)
-+
-+#include <switch.h>
-+
-+// libnx's CSPRNG (otherwise this would fall back on a time-seeded random())
-+static int random_bytes(void *buf, size_t size) {
-+	randomGet(buf, size);
-+	return 0;
-+}
-+
- #elif defined(_WIN32)
- 
- #ifndef _WIN32_WINNT
---- a/src/conn_poll.c	2026-10-29 12:05:30.832699507 -0500
-+++ b/src/conn_poll.c	2026-10-29 12:05:30.846991347 -0500
+--- a/src/conn_poll.c	2026-10-29 15:57:38.771367173 -0500
++++ b/src/conn_poll.c	2026-10-29 15:57:38.778734904 -0500
 @@ -20,7 +20,12 @@
  
  typedef struct registry_impl {
@@ -105,3 +75,96 @@
  	if (udp_sendto_self(registry_impl->interrupt_sock, &dummy, 0) < 0) {
  		if (sockerrno != SEAGAIN && sockerrno != SEWOULDBLOCK) {
  			JLOG_WARN("Failed to interrupt poll by triggering socket, errno=%d", sockerrno);
+--- a/src/random.c	2026-10-29 15:57:38.771367173 -0500
++++ b/src/random.c	2026-10-29 15:57:38.778668378 -0500
+@@ -33,6 +33,16 @@
+ 	return 0;
+ }
+ 
++#elif defined(__SWITCH__)
++
++#include <switch.h>
++
++// libnx's CSPRNG (otherwise this would fall back on a time-seeded random())
++static int random_bytes(void *buf, size_t size) {
++	randomGet(buf, size);
++	return 0;
++}
++
+ #elif defined(_WIN32)
+ 
+ #ifndef _WIN32_WINNT
+--- a/src/socket.h	2026-10-29 15:57:38.771367173 -0500
++++ b/src/socket.h	2026-10-29 15:57:38.791948858 -0500
+@@ -81,7 +81,7 @@
+ #define NO_PMTUDISC
+ #endif
+ 
+-#ifdef __ANDROID__
++#if defined(__ANDROID__) || defined(__SWITCH__) // Switch: no getifaddrs() in libnx
+ #define NO_IFADDRS
+ #else
+ #include <ifaddrs.h>
+@@ -107,6 +107,35 @@
+ #define SEMSGSIZE EMSGSIZE
+ #define SENETUNREACH ENETUNREACH
+ 
++#ifdef __SWITCH__
++#include <stdio.h>
++// libnx forwards getnameinfo() to the system resolver, which does a reverse DNS lookup even
++// with NI_NUMERICHOST. That can take seconds per address, and libjuice formats addresses while
++// holding its connection lock, which then stalls juice_send() and candidate handling.
++static inline int switch_numeric_getnameinfo(const struct sockaddr *sa, socklen_t salen,
++                                             char *host, socklen_t hostlen, char *serv,
++                                             socklen_t servlen, int flags) {
++	(void)flags;
++	const void *src;
++	unsigned short port;
++	if (sa->sa_family == AF_INET && salen >= (socklen_t)sizeof(struct sockaddr_in)) {
++		src = &((const struct sockaddr_in *)sa)->sin_addr;
++		port = ntohs(((const struct sockaddr_in *)sa)->sin_port);
++	} else if (sa->sa_family == AF_INET6 && salen >= (socklen_t)sizeof(struct sockaddr_in6)) {
++		src = &((const struct sockaddr_in6 *)sa)->sin6_addr;
++		port = ntohs(((const struct sockaddr_in6 *)sa)->sin6_port);
++	} else {
++		return EAI_FAMILY;
++	}
++	if (host && hostlen > 0 && !inet_ntop(sa->sa_family, src, host, hostlen))
++		return EAI_OVERFLOW;
++	if (serv && servlen > 0 && snprintf(serv, servlen, "%hu", port) >= (int)servlen)
++		return EAI_OVERFLOW;
++	return 0;
++}
++#define getnameinfo switch_numeric_getnameinfo
++#endif
++
+ #endif // _WIN32
+ 
+ #ifndef IN6_IS_ADDR_LOOPBACK
+--- a/src/udp.c	2026-10-29 15:57:38.771367173 -0500
++++ b/src/udp.c	2026-10-29 15:57:38.792081740 -0500
+@@ -546,6 +546,24 @@
+ 
+ 	freeifaddrs(ifas);
+ 
++#elif defined(__SWITCH__)
++	// SIOCGIFCONF isn't permitted on Switch (EPERM). The console has a single network
++	// interface, and gethostid() returns its IPv4 address (INADDR_LOOPBACK when offline).
++	struct sockaddr_in sin;
++	memset(&sin, 0, sizeof(sin));
++	sin.sin_family = AF_INET;
++	sin.sin_addr.s_addr = (in_addr_t)gethostid();
++	if (sin.sin_addr.s_addr != INADDR_LOOPBACK && sin.sin_addr.s_addr != 0 &&
++	    !addr_is_local((const struct sockaddr *)&sin)) {
++		++ret;
++		if (current != end) {
++			memcpy(&current->addr, &sin, sizeof(sin));
++			current->len = sizeof(sin);
++			addr_set_port((struct sockaddr *)&current->addr, port);
++			++current;
++		}
++	}
++
+ #else // NO_IFADDRS defined
+ 	char buf[4096];
+ 	struct ifconf ifc;

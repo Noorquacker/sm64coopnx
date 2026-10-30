@@ -6,8 +6,12 @@
 # with the small Switch patches in tools/switch/coopnet/:
 #   libjuice: no getifaddrs() on Switch (NO_IFADDRS), random bytes from libnx's CSPRNG,
 #             no pipe() on Switch (wake the poll thread with a localhost UDP socket, as on Windows)
+#             numeric getnameinfo() (libnx's does reverse DNS lookups while libjuice holds its lock),
+#             host candidate from gethostid() (SIOCGIFCONF isn't permitted)
 #   CoopNet:  no <ifaddrs.h>; the device info sent to the server comes from the console's
 #             Wi-Fi MAC address, combined the same way as the MAC addresses on Linux/macOS
+#             no FIONREAD receive limit (Horizon reports 0 bytes, and a 0-byte recv() looks
+#             like a closed connection)
 #
 # Usage: tools/switch/build_coopnet.sh   (requires devkitPro with devkitA64 and libnx)
 set -euo pipefail

@@ -1,5 +1,5 @@
---- a/common/socket.cpp	2026-10-29 12:00:09.796324533 -0500
-+++ b/common/socket.cpp	2026-10-29 12:00:09.814907936 -0500
+--- a/common/socket.cpp	2026-10-29 15:31:09.856175021 -0500
++++ b/common/socket.cpp	2026-10-29 15:31:18.009226852 -0500
 @@ -125,7 +125,11 @@
  
  #include <sys/ioctl.h>
@@ -12,7 +12,20 @@
  
  int SocketInitialize(int aAf, int aType, int aProtocol) {
      return socket(aAf, aType, aProtocol);
-@@ -171,6 +175,24 @@
+@@ -160,6 +164,12 @@
+ }
+ 
+ void SocketLimitBuffer(int aSocket, int64_t* amount) {
++#ifdef __SWITCH__
++    // Horizon's FIONREAD reports 0 bytes, and the 0-byte recv() that follows returns 0,
++    // which reads as a closed connection. Without the limit, the non-blocking recv()
++    // returns what is available, or EAGAIN.
++    return;
++#endif
+     SOCKET_RESET_ERROR();
+     int bufferLength = 0;
+     if (ioctl(aSocket, FIONREAD, &bufferLength) == -1) {
+@@ -171,6 +181,24 @@
      }
  }
  
@@ -37,7 +50,7 @@
  uint64_t SocketGetInfoBits(int aSocket) {
      struct ifaddrs* ifaddr = NULL;
      struct ifaddrs* ifa = NULL;
-@@ -218,5 +240,6 @@
+@@ -218,5 +246,6 @@
      info = SocketAddHash(info);
      return info;
  }
