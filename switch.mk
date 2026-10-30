@@ -87,13 +87,31 @@ $(SWITCH_NACP):
 	@$(PRINT) "$(GREEN)Creating NACP: $(BLUE)$@ $(NO_COL)\n"
 	$(V)$(DKP_TOOLS)/nacptool --create "$(SWITCH_TITLE)" "$(SWITCH_AUTHOR)" "$(SWITCH_VERSION)" $@ --titleid=$(SWITCH_TITLE_ID)
 
+# Prebuilt shader cache: the combiners in res/switch/shader_combiners.txt, compiled on the
+# build machine with the game's GLSL generator and devkitPro's uam (src/pc/switch/shader_cache.h)
+HOST_CC ?= cc
+SWITCH_SHADER_BAKE := $(BUILD_DIR)/tools/shader_bake
+SWITCH_SHADER_CACHE := $(BUILD_DIR)/shadercache
+SWITCH_SHADER_BAKE_SRC := tools/switch/shader_bake.c src/pc/gfx/gfx_glsl.c src/pc/gfx/gfx_cc.c
+
+$(SWITCH_SHADER_BAKE): $(SWITCH_SHADER_BAKE_SRC) src/pc/gfx/gfx_glsl.h src/pc/gfx/gfx_cc.h src/pc/switch/shader_cache.h
+	@$(PRINT) "$(GREEN)Building host tool: $(BLUE)$@ $(NO_COL)\n"
+	$(V)mkdir -p $(@D)
+	$(V)$(HOST_CC) -O2 -std=gnu11 -D_LANGUAGE_C -DNON_MATCHING -DAVOID_UB -Iinclude -Isrc -I. -o $@ $(SWITCH_SHADER_BAKE_SRC)
+
+$(SWITCH_SHADER_CACHE).stamp: $(SWITCH_SHADER_BAKE) res/switch/shader_combiners.txt
+	@$(PRINT) "$(GREEN)Prebuilding shaders: $(BLUE)$(SWITCH_SHADER_CACHE) $(NO_COL)\n"
+	$(V)rm -rf $(SWITCH_SHADER_CACHE)
+	$(V)$(SWITCH_SHADER_BAKE) $(DKP_TOOLS)/uam res/switch/shader_combiners.txt $(SWITCH_SHADER_CACHE)
+	$(V)touch $@
+
 # Built-in resources ship read-only inside the NRO/NSP romfs
-switch-romfs: $(EXE)
+switch-romfs: $(EXE) $(SWITCH_SHADER_CACHE).stamp
 	@$(PRINT) "$(GREEN)Staging romfs: $(BLUE)$(SWITCH_ROMFS) $(NO_COL)\n"
 	$(V)rm -rf $(SWITCH_ROMFS)
 	$(V)mkdir -p $(SWITCH_ROMFS)
 	$(V)cp -r $(BUILD_DIR)/lang $(BUILD_DIR)/mods $(BUILD_DIR)/palettes $(BUILD_DIR)/dynos $(SWITCH_ROMFS)/
-	$(V)cp -r res/switch/licenses $(SWITCH_ROMFS)/
+	$(V)cp -r res/switch/licenses $(SWITCH_SHADER_CACHE) $(SWITCH_ROMFS)/
 
 $(SWITCH_NRO): $(EXE) $(SWITCH_NACP) $(SWITCH_ICON) switch-romfs
 	@$(PRINT) "$(GREEN)Building NRO: $(BLUE)$@ $(NO_COL)\n"
