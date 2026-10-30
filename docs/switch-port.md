@@ -1,10 +1,10 @@
 # sm64coopnx — sm64coopdx for Nintendo Switch (deko3d)
 
-Status: **Phase 6 done** (verified on hardware). The game renders through deko3d, plays handheld and docked,
+Status: **Phase 7 done** (verified on hardware). The game renders through deko3d, plays handheld and docked,
 has the software keyboard for text fields, chat on R3, and mod audio. It hosts and joins unmodified PC builds by
 direct connection and through CoopNet, with mods downloaded in both directions. All bundled mods, a DynOS
-character pack and Lua gamemodes run on hardware. Phase 7 (performance) is in progress: the shader cache is
-prebuilt at build time (verified in yuzu); a test with 4+ players on hardware is still to do.
+character pack and Lua gamemodes run on hardware. Known shaders are prebuilt at build time, and hosting
+8 players holds 60 fps in Bob-omb Battlefield.
 
 ## Building
 
@@ -302,7 +302,7 @@ All eight bundled mods also run in yuzu, each hosted alone, with no Lua errors.
 Base: upstream coopdx at `8cd6e5977` ("Update updater libs"), network version `v42.1`
 (`src/pc/network/version.h`). The Switch build must keep this version so it can play with PC clients.
 
-## Phase 7 (performance) — in progress
+## Phase 7 (performance) — done
 
 Fork footprint was the deciding factor: only changes in Switch-only files. The ideas in section 7b that would
 change shared code (culling or low detail for distant players, audio mixing on another core) are dropped unless
@@ -317,7 +317,7 @@ a test with many players shows they're needed, and would then go upstream.
 | Host uam output vs the Switch build's uam | 110 of 116 files identical; 6 vertex shaders differ in one byte of a scheduling control word |
 | Rerun from an empty user cache, all 180 visits | ✅ 0 shaders compiled at runtime |
 | PC GL vs Switch, 4 scenes, prebuilt shaders only | ✅ same as Phase 3, differences only from animation |
-| Hardware | not tested yet (expected: no compile hitches in vanilla levels, ~5 s less on first boot) |
+| Hardware, cleared user cache: boot plus Castle Grounds, the castle and BoB | ✅ 0 compiles at boot (44 before); 2 at runtime, both from the Triple Baka character pack, since added to the list (64 combiners) |
 
 - **Lookup order:** `<user dir>/shadercache`, then `romfs:/shadercache`, then compile with uam. The key and file
   names are unchanged (`src/pc/switch/shader_cache.h`), so existing user caches stay valid.
@@ -337,6 +337,36 @@ a test with many players shows they're needed, and would then go upstream.
   are then cached on the SD card, as before.
 - **Not a Switch issue:** the log shows `heap.c: Tried to alloc 5184 bytes ... failed!` at boot. The audio pool
   does that on the PC build too (seen with `debug_error true`).
+
+### Many players (hardware, Switch hosting, handheld)
+
+Unmodified upstream PC clients joined by direct connection (`tools/switch/bot_clients.sh`, on Xvfb). The host
+enabled `tools/switch/player-bots`, which makes every other player follow the host into its level and area,
+circle the host's Mario and jump, so each one is simulated, synced and drawn like a real player.
+
+| Players | Where | Duration | Presented fps (10 s windows) | Game ticks | Heap |
+|---|---|---|---|---|---|
+| 1 | Castle Grounds | 20 s | 60.1 | 30/s | 127 MiB |
+| 4 | Castle Grounds | ~110 s | 60.1 | 30/s | 127–129 MiB |
+| 8 | Castle Grounds | 15 s | 60.0–60.3 | 30/s | 129 MiB |
+| 8 | Bob-omb Battlefield, all 7 bots followed within 3 s | ~3 min | 57.3–60.3, average 59.6 | 30/s | 129–131 MiB |
+
+- Game logic never fell behind (300 ticks every 10 s). The occasional 10 s window at 57–59 fps is a few
+  dropped presented frames in a busy course.
+- The estimate in section 7b was too pessimistic: 8 players run at 60 fps, not "30 fps, 60 unlikely". The shared-code
+  mitigations listed there aren't needed for 8 players. Lua-heavy gamemodes and DynOS packs with many players
+  remain untested.
+- `packet_object.c: received uninitialized sync object` appeared 53 times in two bursts in BoB. It's upstream code
+  (unchanged in the fork) dropping updates for objects the host hasn't set up or has already deleted, such as
+  Bob-ombs.
+
+### Hosting with large mods freezes for a few seconds
+
+Pressing Host with character-select-coop and the Triple Baka pack enabled froze the game for about 7 s
+(14:14:18 → 14:14:25 in the log): 3 s loading 42 DynOS actors, about 1.5 s with no log output after the last
+one, 1 s of textures, 1 s of Lua scripts. Upstream activates mods synchronously on the main thread, on PC too.
+The Switch's CPU and SD card make it longer. Not changed in the fork: a background load or loading screen
+belongs in shared code and would be an upstream proposal.
 
 ---
 
@@ -515,7 +545,7 @@ Besides the `.nro`, the build must produce an installable **`.nsp`** (`build/us_
 - Lands in Phase 1 as a packaging target. A title-mode launch is also the best yuzu test, since yuzu's NRO loader
   gives a different memory layout.
 
-## 7b. Expected client-side scaling with many players (estimate, to be measured in Phase 7)
+## 7b. Expected client-side scaling with many players (estimate before Phase 7, see Phase 7 for measurements)
 
 As a **client** the Switch is not spared the per-player work. Every remote player is a full Mario object locally:
 - `bhv_mario_update` runs Mario physics for each one (`src/game/object_list_processor.c:245`).
