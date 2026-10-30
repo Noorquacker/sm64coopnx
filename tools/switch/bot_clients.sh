@@ -6,6 +6,7 @@
 #
 # Usage: tools/switch/bot_clients.sh UPSTREAM_PC_EXE ROM HOST_IP COUNT [DURATION] [FIRST_NUMBER]
 #   Clients are named Claude, Claude2, Claude3, ... starting at FIRST_NUMBER (default 1).
+# Environment: BOT_DISPLAY (default 93), BOT_LOG_DIR (keeps each client's output as NAME.txt)
 set -euo pipefail
 
 PC_EXE=$(realpath "$1")
@@ -20,6 +21,10 @@ WORK_DIR=$(mktemp -d)
 PIDS=()
 cleanup() {
     for pid in "${PIDS[@]}"; do kill -9 "$pid" 2>/dev/null || true; done
+    if [ -n "${BOT_LOG_DIR:-}" ]; then
+        mkdir -p "$BOT_LOG_DIR"
+        for d in "$WORK_DIR"/*/; do cp "$d/stdout.txt" "$BOT_LOG_DIR/$(basename "$d").txt" 2>/dev/null || true; done
+    fi
     rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT INT TERM
