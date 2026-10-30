@@ -347,6 +347,9 @@ bool fs_sys_dir_is_empty(const char *name) {
 }
 
 uint64_t fs_sys_get_modified_time(const char *path) {
+    // mod_activate() asks before a freshly downloaded file has a cached path;
+    // glibc's stat() fails on NULL, but newlib's (Switch) dereferences it
+    if (path == NULL) { return 0; }
 #ifdef _WIN32
     WIN32_FILE_ATTRIBUTE_DATA fad;
     // get attributes, return 0 on error
