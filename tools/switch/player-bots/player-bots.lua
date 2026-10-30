@@ -1,5 +1,5 @@
 -- name: Player Bots
--- description: Load test: every player except the host follows the host into its level and area, circles around the host's Mario and jumps, so joined test clients cost what real players cost. Used for the Switch many-player test.
+-- description: Load test: every player except the host follows the host into its level and area, circles around the host's Mario and jumps, so joined test clients cost what real players cost. With character-select-coop, each bot picks a different character, counting down from the last one added. Used for the Switch many-player test.
 
 local RADIUS = 400
 local TELEPORT_DIST = 2500
@@ -7,6 +7,17 @@ local WARP_RETRY_FRAMES = 30 * 5
 
 local frame = 0
 local lastWarp = -WARP_RETRY_FRAMES
+
+-- picks a character from the end of character-select-coop's table (the last pack loaded), retried until it sticks
+local function pick_character(me)
+    local cs = _G.charSelect
+    if cs == nil or frame % 60 ~= 0 then return end
+    local count = #cs.character_get_full_table()
+    local wanted = count - (me.globalIndex - 1) % count
+    if cs.character_get_current_number() ~= wanted then
+        cs.character_set_current_number(wanted)
+    end
+end
 
 hook_event(HOOK_BEFORE_MARIO_UPDATE, function(m)
     if m.playerIndex ~= 0 or network_is_server() then return end
@@ -18,6 +29,7 @@ hook_event(HOOK_BEFORE_MARIO_UPDATE, function(m)
     local np = gNetworkPlayers[hostIndex]
     local me = gNetworkPlayers[0]
     if not np.connected then return end
+    pick_character(me)
 
     -- follow the host into its level and area (retried, a warp can't start mid-transition)
     if np.currLevelNum ~= me.currLevelNum or np.currAreaIndex ~= me.currAreaIndex then
