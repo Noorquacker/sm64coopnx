@@ -23,6 +23,9 @@ extern int __system_argc;
 extern char **__system_argv;
 
 extern u32 gGlobalTimer; // game/display.h
+extern bool gGameInited; // pc/pc_main.h, set once loading has finished
+
+static u64 sLaunchTick = 0;
 
 static int sNxlinkSocket = -1;
 
@@ -196,6 +199,13 @@ static void *switch_stats_thread(void *arg) {
 
         switch_log_internet_state();
 
+        static bool sLoadTimeLogged = false;
+        if (!sLoadTimeLogged && gGameInited) {
+            sLoadTimeLogged = true;
+            printf("[switch] loaded %.0f s after launch\n",
+                   (double) armTicksToNs(armGetSystemTick() - sLaunchTick) / 1e9);
+        }
+
         // debug: creating an empty "capture" file in the user dir saves the next frame
         // (checked with stat first: yuzu's remove() reports success for missing files)
         struct stat st;
@@ -291,6 +301,7 @@ static Result switch_init_sockets(void) {
 
 // called by libnx before main()
 void userAppInit(void) {
+    sLaunchTick = armGetSystemTick();
     switch_check_applet_mode();
 
     Result socketRc = switch_init_sockets();
