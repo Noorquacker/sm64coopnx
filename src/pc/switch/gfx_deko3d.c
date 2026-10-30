@@ -8,8 +8,11 @@
 // the bottom, while the display shows row 0 at the top. (gl_FragCoord.y counts from
 // the top too, which only shifts the phase of the dither/noise/scanline patterns.)
 //
-// Color combiner shaders come from gfx_glsl.c (GLSL 4.60), are compiled at runtime
-// with uam and cached as DKSH files in <user dir>/shadercache.
+// Color combiner shaders come from gfx_glsl.c (GLSL 4.60). Their DKSH binaries are looked up
+// in <user dir>/shadercache, then in romfs:/shadercache (prebuilt at build time from
+// res/switch/shader_combiners.txt), and only compiled at runtime with uam if neither has
+// them. Each runtime compile is recorded in <user dir>/shadercache/combiners.txt so the
+// combiner can be added to the prebuilt list (see shader_cache.h).
 //
 // Memory: GPU memory that may still be read by a frame in flight (texture images,
 // shader code, overflow blocks) is only freed after that frame's fence has passed.
@@ -37,6 +40,8 @@
 #include "pc/gfx/gfx_glsl.h"
 #include "pc/gfx/gfx_pc.h"
 #include "gfx_switch.h"
+#include "platform_switch.h"
+#include "shader_cache.h"
 
 #define FB_NUM 3
 #define FB_WIDTH  SWITCH_DOCKED_WIDTH
@@ -53,9 +58,6 @@
 #define DEKO3D_MAX_TEXTURES 8192 // image descriptors; texture 0 is a 1x1 white fallback
 #define NUM_WRAP_MODES 3
 #define NUM_SAMPLERS (2 * NUM_WRAP_MODES * NUM_WRAP_MODES)
-
-// bump when anything that ends up in the DKSH cache changes outside the GLSL source
-#define SHADER_CACHE_VERSION "uam-v1.1.0"
 
 #define ALIGN_UP(x, a) (((x) + ((a) - 1)) & ~((a) - 1))
 
@@ -466,14 +468,6 @@ static void gfx_deko3d_create_static_memory(void) {
  // shaders //
 //////////////
 
-static uint64_t fnv1a64(uint64_t hash, const char *data, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        hash ^= (uint8_t) data[i];
-        hash *= 0x100000001b3ULL;
-    }
-    return hash;
-}
-
 static double gfx_deko3d_now(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -520,13 +514,39 @@ static bool gfx_deko3d_load_dksh(const char *path, DkShader *shader, struct Heap
     return true;
 }
 
-static void gfx_deko3d_shader_paths(const struct GfxGlslProgram *glsl, char vsPath[SYS_MAX_PATH], char fsPath[SYS_MAX_PATH]) {
-    uint64_t key = 0xcbf29ce484222325ULL;
-    key = fnv1a64(key, SHADER_CACHE_VERSION, strlen(SHADER_CACHE_VERSION));
-    key = fnv1a64(key, glsl->vs, glsl->vs_len);
-    key = fnv1a64(key, glsl->fs, glsl->fs_len);
-    snprintf(vsPath, SYS_MAX_PATH, "%s/%016llx_vsh.dksh", sShaderCacheDir, (unsigned long long) key);
-    snprintf(fsPath, SYS_MAX_PATH, "%s/%016llx_fsh.dksh", sShaderCacheDir, (unsigned long long) key);
+static void gfx_deko3d_shader_paths(const char *dir, uint64_t key, char vsPath[SYS_MAX_PATH], char fsPath[SYS_MAX_PATH]) {
+    snprintf(vsPath, SYS_MAX_PATH, "%s/%016llx_vsh.dksh", dir, (unsigned long long) key);
+    snprintf(fsPath, SYS_MAX_PATH, "%s/%016llx_fsh.dksh", dir, (unsigned long long) key);
+}
+
+// loads both stages of a cached program; on failure nothing stays allocated
+static bool gfx_deko3d_load_cached_program(struct ShaderProgram *prg, const char *dir, uint64_t key) {
+    char vsPath[SYS_MAX_PATH];
+    char fsPath[SYS_MAX_PATH];
+    gfx_deko3d_shader_paths(dir, key, vsPath, fsPath);
+    if (gfx_deko3d_load_dksh(vsPath, &prg->shaders[0], &prg->code[0])
+        && gfx_deko3d_load_dksh(fsPath, &prg->shaders[1], &prg->code[1])) {
+        return true;
+    }
+    for (int i = 0; i < 2; i++) {
+        if (prg->code[i].heap) { heap_free_now(&prg->code[i]); }
+    }
+    memset(prg->code, 0, sizeof(prg->code));
+    return false;
+}
+
+static void gfx_deko3d_record_combiner(const struct ColorCombiner *cc) {
+    char record[SHADER_CACHE_RECORD_SIZE];
+    shader_cache_format_record(cc, record);
+    printf("[deko3d] new combiner: %s\n", record);
+
+    char path[SYS_MAX_PATH];
+    snprintf(path, sizeof(path), "%s/combiners.txt", sShaderCacheDir);
+    FILE *f = fopen(path, "a");
+    if (f) {
+        fprintf(f, "%s\n", record);
+        fclose(f);
+    }
 }
 
 static void gfx_deko3d_compile_dksh(enum UamStage stage, const char *source, const char *path) {
@@ -537,25 +557,22 @@ static void gfx_deko3d_compile_dksh(enum UamStage stage, const char *source, con
     }
 }
 
-static void gfx_deko3d_load_program(struct ShaderProgram *prg, const struct GfxGlslProgram *glsl) {
-    char vsPath[SYS_MAX_PATH];
-    char fsPath[SYS_MAX_PATH];
-    gfx_deko3d_shader_paths(glsl, vsPath, fsPath);
-
-    if (gfx_deko3d_load_dksh(vsPath, &prg->shaders[0], &prg->code[0])
-        && gfx_deko3d_load_dksh(fsPath, &prg->shaders[1], &prg->code[1])) {
+static void gfx_deko3d_load_program(struct ShaderProgram *prg, const struct ColorCombiner *cc, const struct GfxGlslProgram *glsl) {
+    uint64_t key = shader_cache_key(glsl->vs, glsl->vs_len, glsl->fs, glsl->fs_len);
+    if (gfx_deko3d_load_cached_program(prg, sShaderCacheDir, key)
+        || gfx_deko3d_load_cached_program(prg, SWITCH_RESOURCE_DIR "/shadercache", key)) {
         return;
     }
-    for (int i = 0; i < 2; i++) {
-        if (prg->code[i].heap) { heap_free_now(&prg->code[i]); }
-    }
-    memset(prg->code, 0, sizeof(prg->code));
 
-    // not cached (or the cache entry is damaged): compile with uam
+    // in neither cache (or the entry is damaged): compile with uam
+    char vsPath[SYS_MAX_PATH];
+    char fsPath[SYS_MAX_PATH];
+    gfx_deko3d_shader_paths(sShaderCacheDir, key, vsPath, fsPath);
     double start = gfx_deko3d_now();
     gfx_deko3d_compile_dksh(UAM_STAGE_VERTEX, glsl->vs, vsPath);
     gfx_deko3d_compile_dksh(UAM_STAGE_FRAGMENT, glsl->fs, fsPath);
     printf("[deko3d] compiled shader %016llx in %.0f ms\n", (unsigned long long) prg->hash, (gfx_deko3d_now() - start) * 1000.0);
+    gfx_deko3d_record_combiner(cc);
 
     if (!gfx_deko3d_load_dksh(vsPath, &prg->shaders[0], &prg->code[0])
         || !gfx_deko3d_load_dksh(fsPath, &prg->shaders[1], &prg->code[1])) {
@@ -820,7 +837,7 @@ static struct ShaderProgram *gfx_deko3d_create_and_load_new_shader(struct ColorC
     memset(prg, 0, sizeof(*prg));
     prg->hash = cc->hash;
 
-    gfx_deko3d_load_program(prg, &glsl);
+    gfx_deko3d_load_program(prg, cc, &glsl);
 
     static const DkVtxAttribSize sizes[] = { 0, DkVtxAttribSize_1x32, DkVtxAttribSize_2x32, DkVtxAttribSize_3x32, DkVtxAttribSize_4x32 };
     uint32_t offset = 0;
