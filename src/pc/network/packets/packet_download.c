@@ -246,12 +246,57 @@ static void download_read_close(void) {
     sReadFile = NULL;
 }
 
+// A client that is still downloading isn't a connected player, so repeats of its reliable
+// download request (resent when the host's ack is slow) aren't dropped as duplicates. Serving
+// each repeat queues the whole group again, which delays the acks further until every group is
+// sent dozens of times. The chunks already sent are reliable, so a repeat can be ignored.
+#define RECENT_REQUEST_COUNT 8
+#define RECENT_REQUEST_SECONDS 3.0f
+
+struct RecentDownloadRequest {
+    void* addr;
+    u64 offset;
+    f32 time;
+};
+
+static struct RecentDownloadRequest sRecentRequests[RECENT_REQUEST_COUNT] = { 0 };
+static u32 sRecentRequestNext = 0;
+
+static bool download_request_is_repeat(u64 offset) {
+    // while a packet is handled, local index 0 holds its sender's address
+    void* addr = network_duplicate_address(0);
+    if (addr == NULL) { return false; }
+
+    f32 now = clock_elapsed();
+    for (u32 i = 0; i < RECENT_REQUEST_COUNT; i++) {
+        struct RecentDownloadRequest* r = &sRecentRequests[i];
+        if (r->addr != NULL && r->offset == offset && (now - r->time) < RECENT_REQUEST_SECONDS
+            && gNetworkSystem->match_addr(r->addr, addr)) {
+            free(addr);
+            return true;
+        }
+    }
+
+    struct RecentDownloadRequest* r = &sRecentRequests[sRecentRequestNext];
+    sRecentRequestNext = (sRecentRequestNext + 1) % RECENT_REQUEST_COUNT;
+    if (r->addr != NULL) { free(r->addr); }
+    r->addr = addr;
+    r->offset = offset;
+    r->time = now;
+    return false;
+}
+
 void network_receive_download_request(struct Packet* p) {
     SOFT_ASSERT(gNetworkType == NT_SERVER);
 
     // receive requested offset
     u64 requestOffset;
     packet_read(p, &requestOffset, sizeof(u64));
+
+    if (download_request_is_repeat(requestOffset)) {
+        LOG_INFO("Ignoring repeated request for group: %llu", (requestOffset / GROUP_SIZE));
+        return;
+    }
 
     for (u64 i = 0; i < OFFSET_COUNT; i++) {
         u64 sendOffset = requestOffset + (i * CHUNK_SIZE);
