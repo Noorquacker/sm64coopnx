@@ -37,7 +37,7 @@ for i in $(seq "$FIRST" $((FIRST + COUNT - 1))); do
     printf 'language English\ndebug_info true\n' > "$dir/sm64config.txt"
     # force X11: with WAYLAND_DISPLAY set, SDL would open the window on the real desktop
     (cd "$(dirname "$PC_EXE")" && exec env -u WAYLAND_DISPLAY SDL_VIDEODRIVER=x11 DISPLAY=":$DISPLAY_NUM" \
-        "$PC_EXE" --savepath "$dir" --windowed --width 320 --height 240 --no-discord --skip-intro \
+        stdbuf -oL "$PC_EXE" --savepath "$dir" --windowed --width 320 --height 240 --no-discord --skip-intro \
         --skip-update-check --playername "$name" --client "$HOST_IP" 7777 > "$dir/stdout.txt" 2>&1) &
     PIDS+=($!)
     echo "started $name"
