@@ -1,8 +1,8 @@
 # sm64coopnx — sm64coopdx for Nintendo Switch (deko3d)
 
-Status: **Phase 4 done** (verified on hardware). The game renders through deko3d, plays handheld and docked,
-hosts over IPv4, has the software keyboard for text fields, chat on R3, and mod audio. Phase 5 (networking:
-PC interoperability, CoopNet, mod downloads) is next.
+Status: **Phase 5 done** (verified on hardware). The game renders through deko3d, plays handheld and docked,
+has the software keyboard for text fields, chat on R3, and mod audio. It hosts and joins unmodified PC builds by
+direct connection and through CoopNet, with mods downloaded in both directions. Phase 6 (mods) is next.
 
 ## Building
 
@@ -235,6 +235,41 @@ Packets are identical, and a PC's dual-stack socket talks to IPv4 peers natively
 - **Display:** DJUI's automatic scale is 1.0 at 720p and 1080p (panels are sized in pixels, so they cover more of
   the handheld screen). There's a manual scale in the options.
 
+## Phase 5 (networking) — done
+
+Verified on hardware against an **unmodified** upstream PC build (the same base commit, on a virtual display):
+
+| Scenario | Result |
+|---|---|
+| Switch joins a PC host by direct connection, downloads mods (13 MB, ~290 files) | ✅ |
+| PC joins a Switch host by direct connection, downloads a 1.5 MB mod | ✅ 3 s, no resent chunks |
+| PC joins a Switch-hosted private CoopNet lobby, downloads a 1.5 MB mod | ✅ 2 s, no resent chunks |
+| Switch joins a PC-hosted CoopNet lobby | ✅ |
+
+- **CoopNet:** `lib/coopnet/switch/` (libcoopnet + libjuice) is built by `tools/switch/build_coopnet.sh` from the
+  versions coopdx ships, with the patches in `tools/switch/coopnet/` (listed in the script). Build it without
+  `LOGGING`: CoopNet then sets libjuice to DEBUG, whose default log writer flushes stdout after every line. On
+  Switch stdout is the SD card log, so three flushed lines per received packet capped CoopNet at about 80 packets
+  a second and mod transfers crawled.
+- **TLS/curl:** not needed. CoopNet talks to its server over plain TCP and to peers over UDP (libjuice); only the
+  update checker uses curl.
+- **UDP socket buffers:** libnx's defaults (9 KiB send, 41 KiB receive) can't hold one mod download group (50
+  packets of ~830 bytes, sent at once), and libjuice silently drops sends that would block. `userAppInit` asks for
+  64 KiB / 128 KiB and falls back to the defaults if refused.
+- **Mod downloads, shared code (upstream candidates):**
+  - A client writes each 800-byte chunk with its own seek + write; downloaded files now get a 64 KiB stdio buffer
+    and skip seeks for chunks that arrive in order. Small SD card writes are slow on Switch.
+  - A host opened, read and closed the mod file for every chunk; it now keeps it open for the group.
+  - A client that is still downloading isn't a connected player, so the host didn't drop repeats of its reliable
+    download request. With slow acks, every repeat queued the whole group again and the load snowballed. A host
+    now ignores repeats of the same request from the same address within 3 s. Clients are unchanged.
+  - `mod_activate()` called `stat(NULL)` for freshly downloaded files (glibc fails, newlib crashes).
+- **Logging:** `log.txt` is fully buffered and flushed by the stats thread once a second; with `debug_info` on,
+  line buffering made every log line its own SD write.
+- **Testing a CoopNet lobby:** upstream has no command line option to join one, so the PC side is driven through
+  its menus with `xdotool` on a virtual display (Join → Private Lobbies → password). Run it with `--no-discord`.
+  CoopNet peers can't connect in yuzu (libjuice's socket setup fails there), so CoopNet is tested on hardware only.
+
 Base: upstream coopdx at `8cd6e5977` ("Update updater libs"), network version `v42.1`
 (`src/pc/network/version.h`). The Switch build must keep this version so it can play with PC clients.
 
@@ -365,8 +400,8 @@ window needed). Clipboard, cursor and window title are no-ops. `start_text_input
 | Library | Version | Shipped as | Source available? | aarch64-switch plan |
 |---|---|---|---|---|
 | Lua | 5.3.5 (`lib/lua/include/lua.h`) | `.a` per platform (win32/64, linux x64/arm/arm64, mac) | Yes, upstream lua.org. Not vendored | Build **Lua 5.3.5** from source with devkitA64 into `lib/lua/switch/liblua53.a` (static, `LUA_USE_C89`-ish, no `popen`/`dlopen`). Must stay **5.3** for mod compatibility. Commit the `.a` plus `tools/switch/build_lua.sh` (§7.4) |
-| CoopNet | — | `libcoopnet.a` per platform | Yes: github.com/coop-deluxe/coopnet | build from source for switch (Phase 5) |
-| libjuice | 1.6.2 (mac dylib name) | `libjuice.a` per platform | Yes: github.com/paullouisageneau/libjuice | build from source for switch (Phase 5). Needs BSD sockets and `getaddrinfo`, both in libnx |
+| CoopNet | — | `libcoopnet.a` per platform | Yes: github.com/coop-deluxe/coopnet | **done:** `tools/switch/build_coopnet.sh` (CoopNet 9d9b3dd + patches) |
+| libjuice | 1.6.2 (mac dylib name) | `libjuice.a` per platform | Yes: github.com/paullouisageneau/libjuice | **done:** built by the same script (v1.6.2 + patches) |
 | Discord Game SDK | — | dll/so/dylib only | **No** (closed) | **disabled** on Switch (`DISCORD_SDK=0`) |
 | discord-rpc | — | dll/so/dylib | open, but not useful | not linked (`RPC_LIBS` empty) |
 | coopdx_updater | — | prebuilt exe | — | **disabled** (`UPDATER=0`) |
