@@ -1,8 +1,9 @@
 # sm64coopnx — sm64coopdx for Nintendo Switch (deko3d)
 
-Status: **Phase 5 done** (verified on hardware). The game renders through deko3d, plays handheld and docked,
+Status: **Phase 6 done** (verified on hardware). The game renders through deko3d, plays handheld and docked,
 has the software keyboard for text fields, chat on R3, and mod audio. It hosts and joins unmodified PC builds by
-direct connection and through CoopNet, with mods downloaded in both directions. Phase 6 (mods) is next.
+direct connection and through CoopNet, with mods downloaded in both directions. All bundled mods, a DynOS
+character pack and Lua gamemodes run on hardware. Phase 7 (performance) is next.
 
 ## Building
 
@@ -269,6 +270,33 @@ Verified on hardware against an **unmodified** upstream PC build (the same base 
 - **Testing a CoopNet lobby:** upstream has no command line option to join one, so the PC side is driven through
   its menus with `xdotool` on a virtual display (Join → Private Lobbies → password). Run it with `--no-discord`.
   CoopNet peers can't connect in yuzu (libjuice's socket setup fails there), so CoopNet is tested on hardware only.
+
+## Phase 6 (mods) — done
+
+Verified on hardware, hosting from `args.txt` (`--server 7777 --disable-mods --enable-mod …`), with a PC joining
+for the gamemodes:
+
+| Mods | Result |
+|---|---|
+| star-road, day-night-cycle, cheats, faster-swimming, personal-starcount-ex, character-select-coop + a DynOS character pack ("[CS] Triple Baka Pack", 9.5 MB of models, sounds and textures) | ✅ 60 fps, heap peak 233 MiB |
+| arena (Lua gamemode with custom levels), 2 players | ✅ 60 fps, heap peak 181 MiB |
+| sm74 + hide-and-seek (Lua gamemode), 2 players | ✅ 60 fps, heap peak 160 MiB |
+
+All eight bundled mods also run in yuzu, each hosted alone, with no Lua errors.
+
+- **Bundled folder mods didn't load on hardware:** mod folders are scanned with a base path ending in a slash,
+  so files became `romfs:/mods/arena//main.lua`. Linux, the SD card driver and yuzu accept the doubled separator,
+  Switch's romfs doesn't. `concat_path` no longer doubles it (shared code, upstream candidate).
+- **Memory:** the stats line shows `heap used: X of Y MiB` (the heap is almost all of the process's memory, and
+  deko3d's GPU memory comes from it). Above 90% the log gets a warning and the game shows a popup once. The
+  heaviest test above used 233 of 3048 MiB.
+- **Startup:** the log reports `loaded N s after launch` (7 s with the bundled mods and two character-select mods
+  on the SD card). Folder mods are prepared by DynOS at every launch whether or not they're enabled, so each one
+  on the SD card or in romfs adds a little.
+- **Known mod bug (upstream, not Switch-specific):** `hide-and-seek.lua:249` reads `m.interactObj.behavior`
+  without a nil check; an automatic dialog without an interaction object (seen once in sm74) logs a Lua error.
+- Seen once, not reproduced: while hosting at launch, `recvfrom` returned `ENETDOWN` every frame although the
+  connection was up. A later host launched the same way had none, and PCs joined normally.
 
 Base: upstream coopdx at `8cd6e5977` ("Update updater libs"), network version `v42.1`
 (`src/pc/network/version.h`). The Switch build must keep this version so it can play with PC clients.
