@@ -6,7 +6,7 @@
 #
 # Everything runs on virtual X displays (Xvfb). The PC uses a temporary --savepath.
 # Success = the joining side logs "received join packet" (coopdx's debug_info logging).
-# Screenshots of both sides are written to OUT_DIR.
+# Screenshots of both sides are written to OUT_DIR, plus the files the PC downloaded from a Switch host.
 #
 # Usage: tools/switch/net_test.sh UPSTREAM_PC_EXE ROM OUT_DIR [switch-host|pc-host|both] [MOD_DIR]
 #   UPSTREAM_PC_EXE  sm64coopdx built from unmodified upstream
@@ -150,6 +150,8 @@ if [ "$SCENARIOS" = switch-host ] || [ "$SCENARIOS" = both ]; then
     capture_switch "$OUT_DIR/switch-host_switch.png" || true
     cp "$SD_DIR/log.txt" "$OUT_DIR/switch-host_switch_log.txt" 2>/dev/null || true
     cp "$PC_DIR/stdout.txt" "$OUT_DIR/switch-host_pc_log.txt" 2>/dev/null || true
+    rm -rf "$OUT_DIR/switch-host_pc_download"
+    cp -r "$PC_DIR/.tmp" "$OUT_DIR/switch-host_pc_download" 2>/dev/null || true
     stop_both
     [ -n "${SWITCH_MOD:-}" ] && rm -rf "$SWITCH_MOD"
     report switch-host $ok
