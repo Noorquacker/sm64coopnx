@@ -3,7 +3,8 @@
 Status: **Phase 6 done** (verified on hardware). The game renders through deko3d, plays handheld and docked,
 has the software keyboard for text fields, chat on R3, and mod audio. It hosts and joins unmodified PC builds by
 direct connection and through CoopNet, with mods downloaded in both directions. All bundled mods, a DynOS
-character pack and Lua gamemodes run on hardware. Phase 7 (performance) is next.
+character pack and Lua gamemodes run on hardware. Phase 7 (performance) is in progress: the shader cache is
+prebuilt at build time (verified in yuzu); a test with 4+ players on hardware is still to do.
 
 ## Building
 
@@ -127,7 +128,7 @@ until a renderer exists; gate or remove it later.
 | 60 fps presented in yuzu | ✅ |
 | Host a game (single-player) on Switch | ✅ in yuzu (needed IPv4 sockets, below) |
 | Hardware, handheld: playable, steady 60 fps, no validation errors, cached shaders load at boot | ✅ |
-| Hardware: new combiners compile in **90–135 ms** each (~3× yuzu); several in a row cause a visible hitch | known, Phase 7 (prebuilt cache in romfs / compile ahead) |
+| Hardware: new combiners compile in **90–135 ms** each (~3× yuzu); several in a row cause a visible hitch | Phase 7: known combiners are prebuilt into romfs (see Phase 7) |
 | Hardware: quitting from the menu crashed the console | fixed, two causes: the stats thread outlived the NRO when returning to hbmenu (found via the Atmosphère crash report), then `dkDeviceDestroy: unfreed memory blocks` because shutdown didn't free the texture/shader heaps (reproduced and verified in yuzu with the `quit` trigger) |
 | Hardware: A/B swapped (B jumped and confirmed) | fixed: devkitPro's SDL maps Switch buttons by position (Xbox layout); `gfx_switch_wm.c` registers a by-label mapping, so A jumps/confirms and B punches/goes back |
 | Hardware: quit from the menu, A/B by label | ✅ confirmed after the fixes below |
@@ -164,7 +165,7 @@ so `gfx_opengl.c` keeps only the GL compile/link/lookup code.
   `shadercache.bin` from the handoff: simpler, and a crash can only lose one entry.
 - **Cost in yuzu:** ~30–60 ms per combiner. The first compile of a session takes ~650 ms (GLSL frontend setup).
   First boot compiles the ~43 combiners from `gfx_cc_precomp()`. Later boots load them from the cache. Hardware
-  times still to be measured (Phase 7); shipping a prebuilt cache in romfs is an option if needed.
+  times are 90–135 ms, so known combiners are now prebuilt into romfs (Phase 7).
 
 ### Renderer (`src/pc/switch/gfx_deko3d.c`)
 
@@ -300,6 +301,42 @@ All eight bundled mods also run in yuzu, each hosted alone, with no Lua errors.
 
 Base: upstream coopdx at `8cd6e5977` ("Update updater libs"), network version `v42.1`
 (`src/pc/network/version.h`). The Switch build must keep this version so it can play with PC clients.
+
+## Phase 7 (performance) — in progress
+
+Fork footprint was the deciding factor: only changes in Switch-only files. The ideas in section 7b that would
+change shared code (culling or low detail for distant players, audio mixing on another core) are dropped unless
+a test with many players shows they're needed, and would then go upstream.
+
+### Prebuilt shader cache
+
+| Check | Result |
+|---|---|
+| Combiners gathered in yuzu: 45 level areas × {no cap, metal, vanish, wing} | 62 combiners (44 at boot, 18 in levels) |
+| Host-baked keys match the game's (same GLSL from the shared generator) | ✅ 58 of 58 overlapping programs |
+| Host uam output vs the Switch build's uam | 110 of 116 files identical; 6 vertex shaders differ in one byte of a scheduling control word |
+| Rerun from an empty user cache, all 180 visits | ✅ 0 shaders compiled at runtime |
+| PC GL vs Switch, 4 scenes, prebuilt shaders only | ✅ same as Phase 3, differences only from animation |
+| Hardware | not tested yet (expected: no compile hitches in vanilla levels, ~5 s less on first boot) |
+
+- **Lookup order:** `<user dir>/shadercache`, then `romfs:/shadercache`, then compile with uam. The key and file
+  names are unchanged (`src/pc/switch/shader_cache.h`), so existing user caches stay valid.
+- **List:** `res/switch/shader_combiners.txt`, one line per combiner: the five `gfx_pc_precomp_shader()` words
+  plus the 16 shader commands, which is everything `gfx_glsl_generate()` reads. The game appends each combiner it
+  has to compile to `<user dir>/shadercache/combiners.txt` and logs `[deko3d] new combiner: ...`.
+- **Build:** `tools/switch/shader_bake.c` is a host tool built from the shared `gfx_glsl.c`/`gfx_cc.c`. It
+  generates the GLSL and runs devkitPro's host `uam` (also v1.1.0) into `build/us_nx/shadercache`, which is copied
+  into romfs. It reruns only when the list or the generator changes. Adds about 4 KB per combiner to the NRO.
+- **Host vs Switch uam:** the host tool is deterministic. The one-byte differences come from the two uam builds
+  (devkitPro's x86-64 package vs our aarch64 build of the same tag). Compiling offline with the host uam is the
+  normal deko3d workflow, and the prebuilt shaders render the same as PC.
+- **Regenerating:** `tools/switch/gather_combiners.sh ROM [combiners.txt...]` runs the build in yuzu with the
+  `tools/switch/shader-gather` mod (about 15 min), restores the user cache afterwards and merges new combiners
+  into the list. Extra arguments merge `combiners.txt` files pulled from hardware.
+- **Not covered:** combiners that only mods use (DynOS packs, custom levels) still compile once at runtime and
+  are then cached on the SD card, as before.
+- **Not a Switch issue:** the log shows `heap.c: Tried to alloc 5184 bytes ... failed!` at boot. The audio pool
+  does that on the PC build too (seen with `debug_error true`).
 
 ---
 
