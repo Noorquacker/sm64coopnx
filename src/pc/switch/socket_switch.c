@@ -7,6 +7,7 @@
 
 #include "pc/network/socket/socket.h"
 #include <stdio.h>
+#include <time.h>
 #include "pc/configfile.h"
 #include "pc/debuglog.h"
 #include "pc/djui/djui.h"
@@ -14,6 +15,8 @@
 
 // How often a broken socket may be recreated (see ns_socket_update), in updates (frames)
 #define SOCKET_RECOVERY_INTERVAL 30
+// Time per update for handling received packets; the rest wait in the socket's receive buffer
+#define SOCKET_RECEIVE_BUDGET_NS (10 * 1000 * 1000)
 
 static SOCKET sCurSocket = INVALID_SOCKET;
 static struct sockaddr_in sAddr[MAX_PLAYERS] = { 0 };
@@ -240,8 +243,19 @@ static void ns_socket_recover(int error) {
     }
 }
 
+static u64 socket_now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (u64)ts.tv_sec * 1000000000ULL + (u64)ts.tv_nsec;
+}
+
+// Handles received packets until there are none left or the time budget is used up. Without a
+// budget, a host serving mod downloads to several clients never left this loop (each download
+// request sends a 40 KB group as 50 packets, and their acks keep arriving): the game froze for
+// over a minute, and reliable packets ran out of resends once it resumed.
 static void ns_socket_update(void) {
     if (gNetworkType == NT_NONE) { return; }
+    u64 start = socket_now_ns();
     sUpdateCount++;
     if (sCurSocket == INVALID_SOCKET) {
         ns_socket_recover(0);
@@ -261,7 +275,7 @@ static void ns_socket_update(void) {
             break;
         }
         network_receive(localIndex, &sAddr[0], data, dataLength);
-    } while (true);
+    } while (socket_now_ns() - start < SOCKET_RECEIVE_BUDGET_NS);
 }
 
 static int ns_socket_send(u8 localIndex, void* address, u8* data, u16 dataLength) {
